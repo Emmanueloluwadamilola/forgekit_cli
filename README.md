@@ -37,22 +37,15 @@ package tools.
 
 - Dart SDK `>=3.0.0 <4.0.0`
 - Flutter SDK for app generation and generated-project workflows
-- Mason CLI for brick-backed commands
 - `~/.pub-cache/bin` on your `PATH` when using globally activated Dart tools
-
-Install Mason once:
-
-```sh
-dart pub global activate mason_cli
-```
 
 ## Installation
 
-From this folder:
+Copy and run:
 
 ```sh
-dart pub get
-dart pub global activate --source path .
+dart pub global activate --source git https://github.com/Emmanueloluwadamilola/forgekit_cli.git
+forgekit setup
 ```
 
 Verify the executable:
@@ -64,9 +57,13 @@ forgekit --help
 
 ## Mason Bricks
 
-ForgeKit shells out to `mason make` for app, feature, widget, and service
-generation. Register the included bricks globally so they can be used from any
-Flutter project:
+ForgeKit shells out to Mason for app, feature, widget, and service generation.
+The `forgekit setup` command installs Mason when needed and registers the
+included bricks globally so they can be used from any Flutter project.
+
+You usually do not need to run `mason add` yourself. Use the manual commands
+below only when you are developing ForgeKit from this repository, testing a
+brick directly with Mason, or debugging `forgekit setup`.
 
 ```sh
 mason add -g forge_app --path bricks/forge_app
@@ -115,6 +112,7 @@ forgekit help <command>
 
 | Command | Purpose |
 | --- | --- |
+| `forgekit setup` | Install Mason when needed and register ForgeKit's bundled bricks. |
 | `forgekit create app <name>` | Create a new ForgeKit Flutter project. |
 | `forgekit add feature <name>` | Add a Clean Architecture feature module. |
 | `forgekit add function [feature] <name>` | Generate an API operation from JSON and wire it into a feature. |
@@ -225,6 +223,13 @@ Install dependencies:
 dart pub get
 ```
 
+Activate the CLI from this local checkout:
+
+```sh
+dart pub global activate --source path .
+forgekit setup
+```
+
 Run the CLI from source:
 
 ```sh
@@ -273,9 +278,9 @@ flutter test
 
 | Problem | Fix |
 | --- | --- |
-| `forgekit: command not found` | Add `~/.pub-cache/bin` to `PATH`, then reactivate with `dart pub global activate --source path .`. |
-| `Mason not found` | Run `dart pub global activate mason_cli`. |
-| Mason cannot find a brick | Register the bricks with `mason add -g ...` or run `mason get` in this folder. |
+| `forgekit: command not found` | Add `~/.pub-cache/bin` to `PATH`, then reactivate with `dart pub global activate --source git https://github.com/Emmanueloluwadamilola/forgekit_cli.git`. |
+| `Mason not found` | Run `forgekit setup`. |
+| Mason cannot find a brick | Run `forgekit setup` to register the bundled bricks. |
 | Generated code is missing `.g.dart` files | Run `dart run build_runner build --delete-conflicting-outputs`. |
 | Feature inference fails | Pass the feature name explicitly, for example `forgekit add screen orders detail`. |
 | Font lookup fails | Check the exact font name on Google Fonts and quote multi-word names. |
