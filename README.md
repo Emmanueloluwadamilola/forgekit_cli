@@ -131,7 +131,7 @@ forgekit help <command>
 | `forgekit set icon <image>` | Configure app launcher icons. |
 | `forgekit set splash <image>` | Configure the native splash screen. |
 | `forgekit doctor` | Check the project against the architecture standard. |
-| `forgekit update` | Check pub.dev for a newer CLI version and update globally. |
+| `forgekit update` | Update ForgeKit from the GitHub repository and rerun setup. |
 
 ### Create an App
 
@@ -216,6 +216,17 @@ forgekit add asset ./icons --dir images --recursive
 ForgeKit registers the asset path in `pubspec.yaml` and updates
 `lib/core/presentation/resources/drawables.dart`.
 
+## Updating ForgeKit
+
+Refresh the GitHub-installed CLI:
+
+```sh
+forgekit update
+```
+
+This runs the GitHub activation command and then refreshes ForgeKit's local
+Mason brick setup.
+
 ## How It Works
 
 ```text
@@ -227,7 +238,7 @@ forgekit CLI
         +-- Mason bricks: app, feature, widget, service
         |
         +-- Native generators: function, model, screen, asset, font,
-            flavor, icon, splash, doctor, update
+            flavor, icon, splash, doctor, sync
 ```
 
 Brick-backed commands create known file structures. Native generators edit
@@ -308,8 +319,6 @@ flutter test
   Dart files.
 - Asset and native setup commands copy files into the target project.
 - Font downloads request CSS and font files from Google Fonts.
-- `update` queries pub.dev and can run `dart pub global activate` through
-  `pub_updater`.
 
 ## Troubleshooting
 

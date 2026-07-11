@@ -5,21 +5,18 @@ import '../update_service.dart';
 
 /// `forgekit update`
 ///
-/// Checks pub.dev for a newer forgekit and self-updates with consent.
+/// Updates the globally activated CLI from the GitHub repository.
 class UpdateCommand extends Command<int> {
-  UpdateCommand({required this.version, Logger? logger})
-      : _logger = logger ?? Logger();
+  UpdateCommand({Logger? logger}) : _logger = logger ?? Logger();
 
   final Logger _logger;
-  final String version;
 
   @override
   String get name => 'update';
 
   @override
-  String get description =>
-      'Update ForgeKit to the latest version from pub.dev.';
+  String get description => 'Update ForgeKit from the GitHub repository.';
 
   @override
-  Future<int> run() => runUpdate(logger: _logger, currentVersion: version);
+  Future<int> run() => runUpdate(logger: _logger);
 }

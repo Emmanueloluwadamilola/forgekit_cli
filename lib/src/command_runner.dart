@@ -37,7 +37,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
     addCommand(SetupCommand(logger: _logger));
     addCommand(SyncCommand(logger: _logger));
     addCommand(DoctorCommand(logger: _logger));
-    addCommand(UpdateCommand(version: packageVersion, logger: _logger));
+    addCommand(UpdateCommand(logger: _logger));
   }
 
   final Logger _logger;

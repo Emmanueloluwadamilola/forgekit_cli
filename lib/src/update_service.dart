@@ -1,56 +1,57 @@
 import 'dart:io';
 
 import 'package:mason_logger/mason_logger.dart';
-import 'package:pub_updater/pub_updater.dart';
 
-/// Checks pub.dev for a newer `forgekit` and, with consent, self-updates via
-/// `dart pub global activate`.
-///
-/// Returns `0` on success (including "already latest"), `1` on failure.
-Future<int> runUpdate({
-  required Logger logger,
-  required String currentVersion,
-  PubUpdater? updater,
-}) async {
-  final pub = updater ?? PubUpdater();
-  final progress = logger.progress('Checking pub.dev for updates');
+const forgekitGitUrl =
+    'https://github.com/Emmanueloluwadamilola/forgekit_cli.git';
 
-  String latest;
-  try {
-    latest = await pub.getLatestVersion('forgekit');
-  } catch (_) {
-    progress.fail(
-      'Could not check for updates. '
-      'forgekit may not be published to pub.dev yet.',
-    );
-    return 1;
+/// Updates ForgeKit from the GitHub repository and refreshes local setup.
+Future<int> runUpdate({Logger? logger}) async {
+  final log = logger ?? Logger();
+
+  final updateExit = await _runInherited(
+    'dart',
+    ['pub', 'global', 'activate', '--source', 'git', forgekitGitUrl],
+    logger: log,
+    failureMessage: 'Failed to update ForgeKit from GitHub.',
+  );
+  if (updateExit != 0) return updateExit;
+
+  final setupExit = await _runInherited(
+    'dart',
+    ['pub', 'global', 'run', 'forgekit:forgekit', 'setup'],
+    logger: log,
+    failureMessage: 'ForgeKit updated, but setup failed.',
+  );
+  if (setupExit != 0) {
+    log.info('Try running setup manually: forgekit setup');
+    return setupExit;
   }
 
-  if (latest == currentVersion) {
-    progress.complete('forgekit is up to date ($currentVersion).');
-    return 0;
-  }
-
-  progress.complete('Update available: $currentVersion → $latest');
-
-  // `confirm` needs a TTY; in a non-interactive shell just print instructions.
-  if (!stdout.hasTerminal || !stdin.hasTerminal) {
-    logger.info('Run "forgekit update" in an interactive terminal, or:');
-    logger.info('  dart pub global activate forgekit');
-    return 0;
-  }
-  if (!logger.confirm('Update now?', defaultValue: true)) {
-    logger.info('Skipped. Update later with: forgekit update');
-    return 0;
-  }
-
-  final updating = logger.progress('Updating forgekit');
-  try {
-    await pub.update(packageName: 'forgekit');
-  } catch (_) {
-    updating.fail('Update failed. Try: dart pub global activate forgekit');
-    return 1;
-  }
-  updating.complete('Updated to $latest. Restart your shell to use it.');
+  log.success('ForgeKit updated from GitHub.');
   return 0;
+}
+
+Future<int> _runInherited(
+  String executable,
+  List<String> args, {
+  required Logger logger,
+  required String failureMessage,
+}) async {
+  try {
+    final process = await Process.start(
+      executable,
+      args,
+      mode: ProcessStartMode.inheritStdio,
+      runInShell: true,
+    );
+    final exitCode = await process.exitCode;
+    if (exitCode != 0) logger.err(failureMessage);
+    return exitCode;
+  } on ProcessException catch (e) {
+    logger
+      ..err(failureMessage)
+      ..err(e.message);
+    return 1;
+  }
 }
