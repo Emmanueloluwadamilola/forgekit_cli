@@ -49,6 +49,14 @@ Future<int> runSetup({Logger? logger}) async {
   for (final entry in _bricks.entries) {
     final brickPath = p.join(packageRoot.path, entry.value);
     final progress = log.progress('Registering ${entry.key}');
+
+    // Remove stale registrations first so setup can be re-run non-interactively.
+    await Process.run(
+      'mason',
+      ['remove', '-g', entry.key],
+      runInShell: true,
+    );
+
     final result = await Process.run(
       'mason',
       ['add', '-g', entry.key, '--path', brickPath],
