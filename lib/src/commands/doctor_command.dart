@@ -14,6 +14,11 @@ class DoctorCommand extends Command<int> {
       negatable: false,
       help: 'Exit non-zero on any issue (warnings included).',
     );
+    argParser.addFlag(
+      'fix',
+      negatable: false,
+      help: 'Create missing standard folders/files when safe.',
+    );
   }
 
   final Logger _logger;
@@ -36,6 +41,7 @@ class DoctorCommand extends Command<int> {
       logger: _logger,
       root: root,
       ci: argResults!['ci'] as bool,
+      fix: argResults!['fix'] as bool,
     );
   }
 }

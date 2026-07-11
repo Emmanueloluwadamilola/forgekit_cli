@@ -127,10 +127,20 @@ forgekit help <command>
 | `forgekit add font <name>` | Download and register a Google Font. |
 | `forgekit add asset <file-or-folder>` | Register assets and generate typed `Drawables` constants. |
 | `forgekit add flavor <a,b,c>` | Create flavor config and flavor entrypoints. |
+| `forgekit add env <a,b,c>` | Create JSON-backed environment config files. |
+| `forgekit set env <key> <value>` | Set an environment config value. |
+| `forgekit add i18n <a,b,c>` | Scaffold Flutter localization with ARB files. |
+| `forgekit add string <key> <value>` | Add a localized string to ARB files. |
+| `forgekit add test <type> ...` | Generate starter tests for existing features, models, or functions. |
 | `forgekit sync widget <name>` | Save an edited shared widget for reuse in other apps. |
+| `forgekit registry connect <git-url>` | Connect a team-shared Git widget registry. |
+| `forgekit registry pull` | Pull the connected shared registry. |
+| `forgekit registry push` | Commit and push registry changes. |
+| `forgekit rename feature <old> <new>` | Rename a generated feature and its identifiers. |
+| `forgekit remove feature <name>` | Remove a generated feature and its tests. |
 | `forgekit set icon <image>` | Configure app launcher icons. |
 | `forgekit set splash <image>` | Configure the native splash screen. |
-| `forgekit doctor` | Check the project against the architecture standard. |
+| `forgekit doctor` | Check the project against the architecture standard. Use `--fix` for safe repairs. |
 | `forgekit update` | Update ForgeKit from the GitHub repository and rerun setup. |
 
 ### Create an App
@@ -139,20 +149,24 @@ forgekit help <command>
 forgekit create app my_app
 forgekit create app my_app --org com.example
 forgekit create app my_app --org com.example --font Poppins
+forgekit create app my_app --router go_router
 ```
 
-`create app` runs `flutter create`, then applies the `forge_app` brick.
+`create app` runs `flutter create`, then applies the `forge_app` brick. The
+default router mode is `named`. Use `--router go_router` to generate a
+`MaterialApp.router` setup with `go_router`.
 
 ### Add a Feature
 
 ```sh
 forgekit add feature orders
+forgekit add feature orders --with-tests
 forgekit add feature orders --router go_router
 forgekit add feature orders --no-build-runner
 ```
 
 The default router mode is `named`. Use `--router go_router` when the project
-uses GoRouter.
+was created with GoRouter.
 
 ### Add a Function from JSON
 
@@ -162,6 +176,38 @@ forgekit add function orders fetch_orders --method GET --path /orders
 
 The command prompts for response JSON and optional request payload JSON. Press
 Enter on an empty line to finish each JSON block.
+
+Generate a starter use-case test at the same time:
+
+```sh
+forgekit add function orders fetch_orders --method GET --path /orders --with-tests
+```
+
+### Add Tests
+
+Generate tests for existing code:
+
+```sh
+forgekit add test feature orders
+forgekit add test model orders order
+forgekit add test function orders fetch_orders
+```
+
+Feature tests include real state/provider assertions. Model and function tests
+create starter files because constructors and repository fakes depend on the
+domain shape you define.
+
+### Rename or Remove a Feature
+
+```sh
+forgekit rename feature orders purchases
+forgekit remove feature purchases
+forgekit remove feature purchases --force
+```
+
+`rename feature` updates the feature folder, generated file names, class names,
+imports, and matching generated tests. `remove feature` deletes the feature and
+matching generated tests; review route registrations after removal.
 
 ### Sync a Shared Widget
 
@@ -188,12 +234,33 @@ Synced widgets are stored in `~/.forgekit/widgets`. When a synced widget is
 added to another app, ForgeKit rewrites package imports from the source project
 name to the target project name.
 
+Connect a team-shared widget registry:
+
+```sh
+forgekit registry connect https://github.com/your-org/forgekit_registry.git
+forgekit registry pull
+```
+
+Push an edited widget to the shared registry:
+
+```sh
+forgekit sync widget app_text_field --push
+```
+
+On another machine or app, pull the registry and add the widget by name:
+
+```sh
+forgekit registry pull
+forgekit add widget app_text_field
+```
+
 Useful options:
 
 ```sh
 forgekit add widget app_text_field --force
 forgekit add widget app_text_field --starter
 forgekit sync widget app_text_field --path ./lib/core/presentation/widgets/app_text_field.dart
+forgekit registry status
 ```
 
 ### Add a Model from JSON
@@ -216,6 +283,34 @@ forgekit add asset ./icons --dir images --recursive
 ForgeKit registers the asset path in `pubspec.yaml` and updates
 `lib/core/presentation/resources/drawables.dart`.
 
+### Add Localization
+
+```sh
+forgekit add i18n en,fr,es
+forgekit add string welcomeMessage "Welcome home"
+forgekit add string welcomeMessage "Bienvenue" --locale fr
+```
+
+ForgeKit creates `l10n.yaml`, ARB files in `lib/l10n/`, enables Flutter's
+localization generator in `pubspec.yaml`, and adds `flutter_localizations` plus
+`intl`. Run `flutter gen-l10n` after changing translations.
+
+### Add Environment Config
+
+```sh
+forgekit add env dev,staging,prod
+forgekit set env API_BASE_URL https://dev.example.com --environment dev
+forgekit set env FEATURE_FLAG true --all
+```
+
+ForgeKit writes JSON files under `assets/env/`, registers the folder in
+`pubspec.yaml`, and creates `lib/core/config/env_config.dart`. Load the active
+environment before `runApp`:
+
+```dart
+await EnvConfig.load('dev');
+```
+
 ## Updating ForgeKit
 
 Refresh the GitHub-installed CLI:
@@ -226,6 +321,17 @@ forgekit update
 
 This runs the GitHub activation command and then refreshes ForgeKit's local
 Mason brick setup.
+
+## Architecture Checks
+
+```sh
+forgekit doctor
+forgekit doctor --ci
+forgekit doctor --fix
+```
+
+`doctor --fix` creates missing standard folders and files when ForgeKit can do
+so without overwriting existing code.
 
 ## How It Works
 
@@ -238,7 +344,8 @@ forgekit CLI
         +-- Mason bricks: app, feature, widget, service
         |
         +-- Native generators: function, model, screen, asset, font,
-            flavor, icon, splash, doctor, sync
+            flavor, env, i18n, icon, splash, doctor, sync, test,
+            rename, remove
 ```
 
 Brick-backed commands create known file structures. Native generators edit

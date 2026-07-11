@@ -12,6 +12,11 @@ dependencies:
 
   # State management
   provider: ^6.1.2
+{{^useRouter}}
+
+  # Routing
+  go_router: ^14.0.0
+{{/useRouter}}
 
   # Dependency injection
   get_it: ^8.0.3

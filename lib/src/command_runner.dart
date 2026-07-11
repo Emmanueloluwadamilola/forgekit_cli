@@ -4,6 +4,9 @@ import 'package:mason_logger/mason_logger.dart';
 import 'commands/add_command.dart';
 import 'commands/create_command.dart';
 import 'commands/doctor_command.dart';
+import 'commands/registry_command.dart';
+import 'commands/remove_command.dart';
+import 'commands/rename_command.dart';
 import 'commands/set_command.dart';
 import 'commands/setup_command.dart';
 import 'commands/sync_command.dart';
@@ -33,6 +36,9 @@ class ForgeCommandRunner extends CommandRunner<int> {
     // Register commands.
     addCommand(CreateCommand(logger: _logger));
     addCommand(AddCommand(logger: _logger));
+    addCommand(RegistryCommand(logger: _logger));
+    addCommand(RenameCommand(logger: _logger));
+    addCommand(RemoveCommand(logger: _logger));
     addCommand(SetCommand(logger: _logger));
     addCommand(SetupCommand(logger: _logger));
     addCommand(SyncCommand(logger: _logger));

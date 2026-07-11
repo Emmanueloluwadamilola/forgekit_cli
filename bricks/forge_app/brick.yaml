@@ -18,3 +18,9 @@ vars:
     description: The organization identifier (reverse-domain).
     default: com.forgecyberlabs
     prompt: What is the organization identifier?
+  useRouter:
+    type: boolean
+    description: >-
+      Routing style. true = named routes. false = go_router.
+    default: true
+    prompt: Use named routes? (No = generate a go_router app router instead)

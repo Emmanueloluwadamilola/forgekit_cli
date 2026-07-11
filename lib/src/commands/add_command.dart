@@ -5,11 +5,14 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
 import '../asset_service.dart';
+import '../env_service.dart';
 import '../flavor_service.dart';
 import '../font_service.dart';
 import '../function_service.dart';
+import '../i18n_service.dart';
 import '../model_service.dart';
 import '../screen_service.dart';
+import '../test_service.dart';
 import '../utils.dart';
 import '../widget_registry_service.dart';
 
@@ -29,6 +32,10 @@ class AddCommand extends Command<int> {
     addSubcommand(_AddScreenCommand(logger: _logger));
     addSubcommand(_AddAssetCommand(logger: _logger));
     addSubcommand(_AddFlavorCommand(logger: _logger));
+    addSubcommand(_AddTestCommand(logger: _logger));
+    addSubcommand(_AddI18nCommand(logger: _logger));
+    addSubcommand(_AddStringCommand(logger: _logger));
+    addSubcommand(_AddEnvCommand(logger: _logger));
   }
 
   final Logger _logger;
@@ -39,7 +46,7 @@ class AddCommand extends Command<int> {
   @override
   String get description =>
       'Add a feature, function, model, screen, widget, service, usecase, '
-      'font, asset, or flavor.';
+      'font, asset, flavor, test, i18n, string, or env.';
 }
 
 /// `forgekit add feature <name> [--router named|go_router] [--no-build-runner]`
@@ -56,6 +63,11 @@ class _AddFeatureCommand extends Command<int> {
         'build-runner',
         help: 'Run build_runner after generation.',
         defaultsTo: true,
+      )
+      ..addFlag(
+        'with-tests',
+        negatable: false,
+        help: 'Generate starter tests for the feature.',
       );
   }
 
@@ -116,6 +128,20 @@ class _AddFeatureCommand extends Command<int> {
       return 1;
     }
     progress.complete('Added feature "$name".');
+
+    if (args['with-tests'] as bool) {
+      final root = findProjectRoot();
+      if (root == null) {
+        _logger.err('No pubspec.yaml found after feature generation.');
+        return 1;
+      }
+      final testCode = await addFeatureTests(
+        feature: name,
+        logger: _logger,
+        root: root,
+      );
+      if (testCode != 0) return testCode;
+    }
 
     // Optionally run build_runner to wire up DI / serialization codegen.
     final runBuildRunner = args['build-runner'] as bool;
@@ -322,6 +348,11 @@ class _AddFunctionCommand extends Command<int> {
         'build-runner',
         help: 'Run build_runner after generation.',
         defaultsTo: true,
+      )
+      ..addFlag(
+        'with-tests',
+        negatable: false,
+        help: 'Generate a starter use case test file.',
       );
   }
 
@@ -388,6 +419,16 @@ class _AddFunctionCommand extends Command<int> {
     );
     if (code != 0) return code;
 
+    if (args['with-tests'] as bool) {
+      final testCode = await addFunctionTest(
+        feature: feature,
+        functionName: functionName,
+        logger: _logger,
+        root: root,
+      );
+      if (testCode != 0) return testCode;
+    }
+
     if (args['build-runner'] as bool) {
       return _runBuildRunner(_logger, workingDirectory: root.path);
     }
@@ -415,6 +456,11 @@ class _AddModelCommand extends Command<int> {
         'build-runner',
         help: 'Run build_runner after generation.',
         defaultsTo: true,
+      )
+      ..addFlag(
+        'with-tests',
+        negatable: false,
+        help: 'Generate a starter model test file.',
       );
   }
 
@@ -475,6 +521,16 @@ class _AddModelCommand extends Command<int> {
       feature: feature,
     );
     if (code != 0) return code;
+
+    if (args['with-tests'] as bool) {
+      final testCode = await addModelTest(
+        name: name,
+        logger: _logger,
+        root: root,
+        feature: feature,
+      );
+      if (testCode != 0) return testCode;
+    }
 
     if (args['build-runner'] as bool) {
       return _runBuildRunner(_logger, workingDirectory: root.path);
@@ -653,6 +709,130 @@ class _AddFlavorCommand extends Command<int> {
   }
 }
 
+/// `forgekit add i18n <locales>`
+class _AddI18nCommand extends Command<int> {
+  _AddI18nCommand({Logger? logger}) : _logger = logger ?? Logger();
+
+  final Logger _logger;
+
+  @override
+  String get name => 'i18n';
+
+  @override
+  String get description =>
+      'Scaffold Flutter localization with ARB files and l10n.yaml.';
+
+  @override
+  String get invocation => 'forgekit add i18n <en,fr,es>';
+
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    if (rest.isEmpty) {
+      _logger.err('Expected a comma-separated list of locales.');
+      _logger.info('Usage: $invocation');
+      return 1;
+    }
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+    final locales = rest
+        .expand((arg) => arg.split(','))
+        .map((locale) => locale.trim())
+        .where((locale) => locale.isNotEmpty)
+        .toList();
+    return addI18n(locales: locales, logger: _logger, root: root);
+  }
+}
+
+/// `forgekit add string <key> <value>`
+class _AddStringCommand extends Command<int> {
+  _AddStringCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser.addOption(
+      'locale',
+      abbr: 'l',
+      help:
+          'Update only one locale, e.g. en or en_US. Defaults to all ARB files.',
+    );
+  }
+
+  final Logger _logger;
+
+  @override
+  String get name => 'string';
+
+  @override
+  String get description => 'Add a localized string to ARB files.';
+
+  @override
+  String get invocation => 'forgekit add string <key> <value> [--locale en]';
+
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    if (rest.length < 2) {
+      _logger.err('Expected <key> <value>.');
+      _logger.info('Usage: $invocation');
+      return 1;
+    }
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+    return addLocalizedString(
+      key: rest.first,
+      value: rest.skip(1).join(' '),
+      logger: _logger,
+      root: root,
+      locale: argResults!['locale'] as String?,
+    );
+  }
+}
+
+/// `forgekit add env <names>`
+class _AddEnvCommand extends Command<int> {
+  _AddEnvCommand({Logger? logger}) : _logger = logger ?? Logger();
+
+  final Logger _logger;
+
+  @override
+  String get name => 'env';
+
+  @override
+  String get description => 'Scaffold JSON-backed environment configuration.';
+
+  @override
+  String get invocation => 'forgekit add env <dev,staging,prod>';
+
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    if (rest.isEmpty) {
+      _logger.err('Expected a comma-separated list of environments.');
+      _logger.info('Usage: $invocation');
+      return 1;
+    }
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+    final environments = rest
+        .expand((arg) => arg.split(','))
+        .map((env) => env.trim())
+        .where((env) => env.isNotEmpty)
+        .toList();
+    return addEnvironments(
+      environments: environments,
+      logger: _logger,
+      root: root,
+    );
+  }
+}
+
 /// `forgekit add usecase <feature> <name>`
 ///
 /// There is no dedicated brick for a single usecase, so the file is written
@@ -716,6 +896,174 @@ class _AddUsecaseCommand extends Command<int> {
 
     progress.complete('Created $filePath');
     return 0;
+  }
+}
+
+/// `forgekit add test ...`
+class _AddTestCommand extends Command<int> {
+  _AddTestCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    addSubcommand(_AddFeatureTestCommand(logger: _logger));
+    addSubcommand(_AddModelTestCommand(logger: _logger));
+    addSubcommand(_AddFunctionTestCommand(logger: _logger));
+  }
+
+  final Logger _logger;
+
+  @override
+  String get name => 'test';
+
+  @override
+  String get description =>
+      'Generate starter tests for existing features, models, or functions.';
+}
+
+class _AddFeatureTestCommand extends Command<int> {
+  _AddFeatureTestCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser.addFlag(
+      'force',
+      abbr: 'f',
+      negatable: false,
+      help: 'Overwrite existing generated tests.',
+    );
+  }
+
+  final Logger _logger;
+
+  @override
+  String get name => 'feature';
+
+  @override
+  String get description => 'Generate state/provider tests for a feature.';
+
+  @override
+  String get invocation => 'forgekit add test feature <name> [--force]';
+
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    if (rest.length != 1) {
+      _logger.err('Expected exactly one argument: <name>.');
+      _logger.info('Usage: $invocation');
+      return 1;
+    }
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+    return addFeatureTests(
+      feature: rest.first,
+      logger: _logger,
+      root: root,
+      force: argResults!['force'] as bool,
+    );
+  }
+}
+
+class _AddModelTestCommand extends Command<int> {
+  _AddModelTestCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser
+      ..addOption(
+        'feature',
+        help: 'Model feature. Omit for a core model.',
+      )
+      ..addFlag(
+        'force',
+        abbr: 'f',
+        negatable: false,
+        help: 'Overwrite an existing generated test.',
+      );
+  }
+
+  final Logger _logger;
+
+  @override
+  String get name => 'model';
+
+  @override
+  String get description => 'Generate a starter test for a model.';
+
+  @override
+  String get invocation =>
+      'forgekit add test model [<feature>] <name> [--force]';
+
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+
+    final String name;
+    String? feature;
+    if (rest.length == 2) {
+      feature = rest[0];
+      name = rest[1];
+    } else if (rest.length == 1) {
+      name = rest[0];
+      feature =
+          argResults!['feature'] as String? ?? inferFeatureName(root: root);
+    } else {
+      _logger.err('Expected [<feature>] <name>.');
+      _logger.info('Usage: $invocation');
+      return 1;
+    }
+
+    return addModelTest(
+      name: name,
+      logger: _logger,
+      root: root,
+      feature: feature,
+      force: argResults!['force'] as bool,
+    );
+  }
+}
+
+class _AddFunctionTestCommand extends Command<int> {
+  _AddFunctionTestCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser.addFlag(
+      'force',
+      abbr: 'f',
+      negatable: false,
+      help: 'Overwrite an existing generated test.',
+    );
+  }
+
+  final Logger _logger;
+
+  @override
+  String get name => 'function';
+
+  @override
+  String get description => 'Generate a starter test for a feature use case.';
+
+  @override
+  String get invocation =>
+      'forgekit add test function <feature> <name> [--force]';
+
+  @override
+  Future<int> run() async {
+    final rest = argResults!.rest;
+    if (rest.length != 2) {
+      _logger.err('Expected two arguments: <feature> <name>.');
+      _logger.info('Usage: $invocation');
+      return 1;
+    }
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+
+    return addFunctionTest(
+      feature: rest[0],
+      functionName: rest[1],
+      logger: _logger,
+      root: root,
+      force: argResults!['force'] as bool,
+    );
   }
 }
 

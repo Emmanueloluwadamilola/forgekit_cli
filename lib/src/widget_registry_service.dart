@@ -5,6 +5,7 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
 import 'json_to_dart.dart';
+import 'registry_service.dart';
 import 'utils.dart';
 
 class SyncedWidget {
@@ -20,6 +21,7 @@ class SyncedWidget {
 Future<int> syncWidget({
   required String name,
   String? sourcePath,
+  bool push = false,
   Logger? logger,
 }) async {
   final log = logger ?? Logger();
@@ -52,23 +54,44 @@ Future<int> syncWidget({
 
   final projectName =
       root == null ? detectProjectName() : detectProjectName(root: root);
-  final targetDir = Directory(p.join(_widgetsHome().path, snake));
-  await targetDir.create(recursive: true);
-
-  final targetFile = File(p.join(targetDir.path, '$snake.dart'));
-  await sourceFile.copy(targetFile.path);
-
   final manifest = <String, Object?>{
     'name': snake,
     'sourceProject': projectName,
     'sourcePath': sourceFile.path,
     'syncedAt': DateTime.now().toUtc().toIso8601String(),
   };
-  await File(p.join(targetDir.path, 'widget.json')).writeAsString(
-    const JsonEncoder.withIndent('  ').convert(manifest),
+
+  await _writeSyncedWidget(
+    sourceFile: sourceFile,
+    targetDir: Directory(p.join(_widgetsHome().path, snake)),
+    snake: snake,
+    manifest: manifest,
   );
 
   log.success('Synced widget "$snake".');
+
+  if (push) {
+    final registryWidgets = registryWidgetsDirSync();
+    if (registryWidgets == null) {
+      log.err(
+        'No shared registry connected. Run: forgekit registry connect <git-url>',
+      );
+      return 1;
+    }
+    await _writeSyncedWidget(
+      sourceFile: sourceFile,
+      targetDir: Directory(p.join(registryWidgets.path, snake)),
+      snake: snake,
+      manifest: manifest,
+    );
+    final pushExit = await pushRegistry(
+      logger: log,
+      message: 'Sync widget $snake',
+    );
+    if (pushExit != 0) return pushExit;
+    log.success('Pushed widget "$snake" to the shared registry.');
+  }
+
   log.info('Install it in another project with: forgekit add widget $snake');
   return 0;
 }
@@ -81,7 +104,8 @@ Future<SyncedWidget?> installSyncedWidget({
 }) async {
   final log = logger ?? Logger();
   final snake = snakeCase(name);
-  final widgetDir = Directory(p.join(_widgetsHome().path, snake));
+  final widgetDir = _findWidgetDir(snake);
+  if (widgetDir == null) return null;
   final sourceFile = File(p.join(widgetDir.path, '$snake.dart'));
 
   if (!sourceFile.existsSync()) return null;
@@ -119,6 +143,34 @@ Future<SyncedWidget?> installSyncedWidget({
 
   await targetFile.writeAsString(contents);
   return SyncedWidget(name: snake, path: targetFile.path);
+}
+
+Future<void> _writeSyncedWidget({
+  required File sourceFile,
+  required Directory targetDir,
+  required String snake,
+  required Map<String, Object?> manifest,
+}) async {
+  await targetDir.create(recursive: true);
+  await sourceFile.copy(p.join(targetDir.path, '$snake.dart'));
+  await File(p.join(targetDir.path, 'widget.json')).writeAsString(
+    '${const JsonEncoder.withIndent('  ').convert(manifest)}\n',
+  );
+}
+
+Directory? _findWidgetDir(String snake) {
+  final localDir = Directory(p.join(_widgetsHome().path, snake));
+  if (File(p.join(localDir.path, '$snake.dart')).existsSync()) {
+    return localDir;
+  }
+
+  final registryWidgets = registryWidgetsDirSync();
+  if (registryWidgets == null) return null;
+  final registryDir = Directory(p.join(registryWidgets.path, snake));
+  if (File(p.join(registryDir.path, '$snake.dart')).existsSync()) {
+    return registryDir;
+  }
+  return null;
 }
 
 Future<String?> _readSourceProject(Directory widgetDir) async {

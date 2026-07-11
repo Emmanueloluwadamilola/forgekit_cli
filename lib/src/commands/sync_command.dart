@@ -23,12 +23,19 @@ class SyncCommand extends Command<int> {
 /// `forgekit sync widget <name> [--path <file>]`
 class _SyncWidgetCommand extends Command<int> {
   _SyncWidgetCommand({Logger? logger}) : _logger = logger ?? Logger() {
-    argParser.addOption(
-      'path',
-      abbr: 'p',
-      help:
-          'Path to the widget file to sync. Defaults to the shared widget path.',
-    );
+    argParser
+      ..addOption(
+        'path',
+        abbr: 'p',
+        help:
+            'Path to the widget file to sync. Defaults to the shared widget path.',
+      )
+      ..addFlag(
+        'push',
+        negatable: false,
+        help:
+            'Also sync the widget to the connected shared registry and push it.',
+      );
   }
 
   final Logger _logger;
@@ -41,7 +48,8 @@ class _SyncWidgetCommand extends Command<int> {
       'Sync a shared widget into the local widget library.';
 
   @override
-  String get invocation => 'forgekit sync widget <name> [--path <file>]';
+  String get invocation =>
+      'forgekit sync widget <name> [--path <file>] [--push]';
 
   @override
   Future<int> run() async {
@@ -55,6 +63,7 @@ class _SyncWidgetCommand extends Command<int> {
     return syncWidget(
       name: rest.first,
       sourcePath: argResults!['path'] as String?,
+      push: argResults!['push'] as bool,
       logger: _logger,
     );
   }

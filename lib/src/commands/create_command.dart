@@ -37,6 +37,12 @@ class _CreateAppCommand extends Command<int> {
         'font',
         help: 'A Google Font to download and wire into the app theme '
             '(e.g. Poppins).',
+      )
+      ..addOption(
+        'router',
+        help: 'Routing style for the generated app.',
+        allowed: ['named', 'go_router'],
+        defaultsTo: 'named',
       );
   }
 
@@ -51,7 +57,7 @@ class _CreateAppCommand extends Command<int> {
 
   @override
   String get invocation =>
-      'forgekit create app <name> [--org <org>] [--font <FontName>]';
+      'forgekit create app <name> [--org <org>] [--font <FontName>] [--router named|go_router]';
 
   @override
   Future<int> run() async {
@@ -73,6 +79,8 @@ class _CreateAppCommand extends Command<int> {
     final name = rest.first;
     final org = args['org'] as String;
     final font = args['font'] as String?;
+    final router = args['router'] as String;
+    final useRouter = router == 'named';
 
     final platforms = _logger.chooseAny(
       'Select target platforms to support:',
@@ -119,6 +127,8 @@ class _CreateAppCommand extends Command<int> {
         name,
         '--org',
         org,
+        '--useRouter',
+        '$useRouter',
         '--on-conflict',
         'overwrite',
       ],

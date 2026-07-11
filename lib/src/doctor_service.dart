@@ -15,10 +15,20 @@ Future<int> runDoctor({
   required Logger logger,
   required Directory root,
   bool ci = false,
+  bool fix = false,
 }) async {
   final projectName = detectProjectName(root: root);
   logger.info('Forge doctor — checking "$projectName"');
   logger.info('');
+
+  if (fix) {
+    final fixed = await _applyFixes(root: root, logger: logger);
+    if (fixed > 0) {
+      logger.info('');
+      logger.info('Rechecking after fixes...');
+      logger.info('');
+    }
+  }
 
   final issues = <_Issue>[];
 
@@ -70,6 +80,109 @@ Future<int> runDoctor({
   return errors.isEmpty ? 0 : 1;
 }
 
+Future<int> _applyFixes({
+  required Directory root,
+  required Logger logger,
+}) async {
+  final projectName = detectProjectName(root: root);
+  var fixed = 0;
+
+  final files = <String, String>{
+    'lib/core/di/core_module.dart': _coreModuleTemplate(),
+    'lib/core/di/core_module_container.dart': _coreModuleContainerTemplate(),
+    'lib/core/domain/api/api_result.dart': _apiResultTemplate(),
+    'lib/core/domain/usecase/use_case.dart': _useCaseTemplate(),
+    'lib/core/presentation/manager/custom_provider.dart':
+        _customProviderTemplate(),
+    'lib/core/presentation/manager/custom_state.dart': _customStateTemplate(),
+  };
+
+  for (final entry in files.entries) {
+    final file = File(p.join(root.path, entry.key));
+    if (!file.existsSync()) {
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(entry.value);
+      logger.success('Created ${entry.key}');
+      fixed++;
+    }
+  }
+
+  final featuresDir = Directory(p.join(root.path, 'lib', 'features'));
+  if (!featuresDir.existsSync()) {
+    featuresDir.createSync(recursive: true);
+    logger.success('Created lib/features/');
+    fixed++;
+    return fixed;
+  }
+
+  final featureDirs = featuresDir.listSync().whereType<Directory>().toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
+  for (final fd in featureDirs) {
+    fixed += _fixFeature(
+      featureDir: fd,
+      projectName: projectName,
+      logger: logger,
+    );
+  }
+
+  if (fixed == 0) {
+    logger.info('No safe fixes were needed.');
+  }
+  return fixed;
+}
+
+int _fixFeature({
+  required Directory featureDir,
+  required String projectName,
+  required Logger logger,
+}) {
+  final f = p.basename(featureDir.path);
+  final pascal = pascalCase(f);
+  final camel = camelCase(f);
+  final files = <String, String>{
+    'data/remote/service/${f}_api_service.dart': _apiServiceTemplate(
+      featureSnake: f,
+      featurePascal: pascal,
+    ),
+    'data/repository/${f}_repository_impl.dart': _repositoryImplTemplate(
+      projectName: projectName,
+      featureSnake: f,
+      featurePascal: pascal,
+    ),
+    'domain/repository/${f}_repository.dart': _repositoryTemplate(
+      featureSnake: f,
+      featurePascal: pascal,
+    ),
+    'presentation/manager/${f}_provider.dart': _providerTemplate(
+      projectName: projectName,
+      featureSnake: f,
+      featurePascal: pascal,
+    ),
+    'presentation/manager/${f}_state.dart': _stateTemplate(
+      projectName: projectName,
+      featurePascal: pascal,
+    ),
+    'di/${f}_module.dart': _moduleTemplate(
+      projectName: projectName,
+      featureSnake: f,
+      featurePascal: pascal,
+      featureCamel: camel,
+    ),
+  };
+
+  var fixed = 0;
+  for (final entry in files.entries) {
+    final file = File(p.join(featureDir.path, entry.key));
+    if (!file.existsSync()) {
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(entry.value);
+      logger.success('Created lib/features/$f/${entry.key}');
+      fixed++;
+    }
+  }
+  return fixed;
+}
+
 void _checkFeature(Directory featureDir, List<_Issue> issues) {
   final f = p.basename(featureDir.path);
   final pascal = pascalCase(f);
@@ -114,3 +227,200 @@ class _Issue {
   final String message;
   final bool isError;
 }
+
+String _coreModuleTemplate() => '''
+import 'package:dio/dio.dart';
+import 'package:injectable/injectable.dart';
+
+@module
+abstract class CoreModule {
+  @lazySingleton
+  Dio dio() => Dio();
+}
+''';
+
+String _coreModuleContainerTemplate() => '''
+import 'package:get_it/get_it.dart';
+import 'package:injectable/injectable.dart';
+
+final getIt = GetIt.instance;
+
+@InjectableInit()
+Future<void> configureDependencies() async {}
+''';
+
+String _apiResultTemplate() => '''
+sealed class ApiResult<T> {
+  const ApiResult();
+}
+
+class Success<T> extends ApiResult<T> {
+  const Success(this.data);
+
+  final T data;
+}
+
+class Failure<T> extends ApiResult<T> {
+  const Failure(this.message, {this.statusCode});
+
+  final String message;
+  final int? statusCode;
+}
+''';
+
+String _useCaseTemplate() => '''
+abstract class UseCase<Type, Params> {
+  Future<Type> call(Params params);
+}
+
+class NoParams {
+  const NoParams();
+}
+''';
+
+String _customProviderTemplate() => '''
+import 'package:flutter/material.dart';
+
+class CustomProvider extends ChangeNotifier {
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+}
+''';
+
+String _customStateTemplate() => '''
+enum ViewStatus { idle, loading, success, error }
+
+class CustomState {
+  const CustomState({
+    this.status = ViewStatus.idle,
+    this.errorMessage,
+  });
+
+  final ViewStatus status;
+  final String? errorMessage;
+
+  bool get isLoading => status == ViewStatus.loading;
+  bool get hasError => status == ViewStatus.error;
+}
+''';
+
+String _apiServiceTemplate({
+  required String featureSnake,
+  required String featurePascal,
+}) =>
+    '''
+import 'package:dio/dio.dart';
+import 'package:retrofit/retrofit.dart';
+
+part '${featureSnake}_api_service.g.dart';
+
+@RestApi()
+abstract class ${featurePascal}ApiService {
+  factory ${featurePascal}ApiService(Dio dio, {String baseUrl}) =
+      _${featurePascal}ApiService;
+}
+''';
+
+String _repositoryImplTemplate({
+  required String projectName,
+  required String featureSnake,
+  required String featurePascal,
+}) =>
+    '''
+import 'package:injectable/injectable.dart';
+
+import 'package:$projectName/features/$featureSnake/data/remote/service/${featureSnake}_api_service.dart';
+import 'package:$projectName/features/$featureSnake/domain/repository/${featureSnake}_repository.dart';
+
+@LazySingleton(as: ${featurePascal}Repository)
+class ${featurePascal}RepositoryImpl implements ${featurePascal}Repository {
+  ${featurePascal}RepositoryImpl(this._apiService);
+
+  // ignore: unused_field
+  final ${featurePascal}ApiService _apiService;
+}
+''';
+
+String _repositoryTemplate({
+  required String featureSnake,
+  required String featurePascal,
+}) =>
+    '''
+/// Abstract repository contract for the $featurePascal feature.
+///
+/// Methods are added by: `forgekit add function $featureSnake <name>`
+abstract class ${featurePascal}Repository {}
+''';
+
+String _providerTemplate({
+  required String projectName,
+  required String featureSnake,
+  required String featurePascal,
+}) =>
+    '''
+import 'package:injectable/injectable.dart';
+
+import 'package:$projectName/core/presentation/manager/custom_provider.dart';
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+
+@injectable
+class ${featurePascal}Provider extends CustomProvider {
+  ${featurePascal}State _state = const ${featurePascal}State();
+  ${featurePascal}State get state => _state;
+}
+''';
+
+String _stateTemplate({
+  required String projectName,
+  required String featurePascal,
+}) =>
+    '''
+import 'package:$projectName/core/presentation/manager/custom_state.dart';
+
+class ${featurePascal}State extends CustomState {
+  const ${featurePascal}State({
+    super.status,
+    super.errorMessage,
+  });
+
+  ${featurePascal}State copyWith({
+    ViewStatus? status,
+    String? errorMessage,
+  }) {
+    return ${featurePascal}State(
+      status: status ?? this.status,
+      errorMessage: errorMessage ?? this.errorMessage,
+    );
+  }
+}
+''';
+
+String _moduleTemplate({
+  required String projectName,
+  required String featureSnake,
+  required String featurePascal,
+  required String featureCamel,
+}) =>
+    '''
+import 'package:dio/dio.dart';
+import 'package:injectable/injectable.dart';
+
+import 'package:$projectName/features/$featureSnake/data/remote/service/${featureSnake}_api_service.dart';
+
+@module
+abstract class ${featurePascal}Module {
+  @lazySingleton
+  ${featurePascal}ApiService ${featureCamel}ApiService(Dio dio) =>
+      ${featurePascal}ApiService(dio);
+}
+''';
