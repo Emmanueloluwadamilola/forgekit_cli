@@ -59,7 +59,10 @@ forgekit --help
 
 ForgeKit shells out to Mason for app, feature, widget, and service generation.
 The `forgekit setup` command installs Mason when needed and registers the
-included bricks globally so they can be used from any Flutter project.
+included bricks globally so they can be used from any Flutter project. When
+ForgeKit is installed from GitHub, setup copies the bundled bricks to
+`~/.forgekit/bricks` before registering them, so Mason can compile brick hooks
+outside Dart's package cache.
 
 You usually do not need to run `mason add` yourself. Use the manual commands
 below only when you are developing ForgeKit from this repository, testing a
