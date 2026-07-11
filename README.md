@@ -121,12 +121,13 @@ forgekit help <command>
 | `forgekit add function [feature] <name>` | Generate an API operation from JSON and wire it into a feature. |
 | `forgekit add model [feature] <name>` | Generate a domain model and DTO from JSON. |
 | `forgekit add screen [feature] <name>` | Add a screen with a route id. |
-| `forgekit add widget <name>` | Generate a shared design-system widget. |
+| `forgekit add widget <name>` | Add a synced shared widget or generate a starter widget. |
 | `forgekit add service <name>` | Generate a cross-cutting service. |
 | `forgekit add usecase <feature> <name>` | Generate one use case in an existing feature. |
 | `forgekit add font <name>` | Download and register a Google Font. |
 | `forgekit add asset <file-or-folder>` | Register assets and generate typed `Drawables` constants. |
 | `forgekit add flavor <a,b,c>` | Create flavor config and flavor entrypoints. |
+| `forgekit sync widget <name>` | Save an edited shared widget for reuse in other apps. |
 | `forgekit set icon <image>` | Configure app launcher icons. |
 | `forgekit set splash <image>` | Configure the native splash screen. |
 | `forgekit doctor` | Check the project against the architecture standard. |
@@ -161,6 +162,39 @@ forgekit add function orders fetch_orders --method GET --path /orders
 
 The command prompts for response JSON and optional request payload JSON. Press
 Enter on an empty line to finish each JSON block.
+
+### Sync a Shared Widget
+
+Create a starter widget:
+
+```sh
+forgekit add widget app_text_field
+```
+
+After editing the generated file, sync it into your local ForgeKit widget
+library:
+
+```sh
+forgekit sync widget app_text_field
+```
+
+Add the synced version to another Flutter app:
+
+```sh
+forgekit add widget app_text_field
+```
+
+Synced widgets are stored in `~/.forgekit/widgets`. When a synced widget is
+added to another app, ForgeKit rewrites package imports from the source project
+name to the target project name.
+
+Useful options:
+
+```sh
+forgekit add widget app_text_field --force
+forgekit add widget app_text_field --starter
+forgekit sync widget app_text_field --path ./lib/core/presentation/widgets/app_text_field.dart
+```
 
 ### Add a Model from JSON
 

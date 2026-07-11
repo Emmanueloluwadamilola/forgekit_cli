@@ -11,6 +11,7 @@ import '../function_service.dart';
 import '../model_service.dart';
 import '../screen_service.dart';
 import '../utils.dart';
+import '../widget_registry_service.dart';
 
 /// `forgekit add ...`
 ///
@@ -131,7 +132,21 @@ class _AddFeatureCommand extends Command<int> {
 
 /// `forgekit add widget <name>`
 class _AddWidgetCommand extends Command<int> {
-  _AddWidgetCommand({Logger? logger}) : _logger = logger ?? Logger();
+  _AddWidgetCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser
+      ..addFlag(
+        'force',
+        abbr: 'f',
+        negatable: false,
+        help: 'Overwrite an existing widget when installing a synced widget.',
+      )
+      ..addFlag(
+        'starter',
+        negatable: false,
+        help:
+            'Generate the starter widget template even if a synced widget exists.',
+      );
+  }
 
   final Logger _logger;
 
@@ -139,10 +154,11 @@ class _AddWidgetCommand extends Command<int> {
   String get name => 'widget';
 
   @override
-  String get description => 'Generate a shared design-system widget.';
+  String get description =>
+      'Add a synced shared widget or generate a starter widget.';
 
   @override
-  String get invocation => 'forgekit add widget <name>';
+  String get invocation => 'forgekit add widget <name> [--force] [--starter]';
 
   @override
   Future<int> run() async {
@@ -154,6 +170,26 @@ class _AddWidgetCommand extends Command<int> {
     }
 
     final name = rest.first;
+    final useStarter = argResults!['starter'] as bool;
+    final force = argResults!['force'] as bool;
+    final root = findProjectRoot() ?? Directory.current;
+
+    if (!useStarter) {
+      final synced = await installSyncedWidget(
+        name: name,
+        root: root,
+        force: force,
+        logger: _logger,
+      );
+
+      if (synced != null) {
+        if (synced.name.isEmpty) return 1;
+        _logger.success('Added synced widget "${synced.name}".');
+        _logger.info('Wrote ${synced.path}');
+        return 0;
+      }
+    }
+
     final projectName = detectProjectName();
     final progress = _logger.progress('Adding widget "$name"');
 

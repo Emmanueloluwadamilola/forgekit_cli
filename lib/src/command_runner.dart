@@ -6,6 +6,7 @@ import 'commands/create_command.dart';
 import 'commands/doctor_command.dart';
 import 'commands/set_command.dart';
 import 'commands/setup_command.dart';
+import 'commands/sync_command.dart';
 import 'commands/update_command.dart';
 
 /// The current CLI version. Keep in sync with `pubspec.yaml`.
@@ -34,6 +35,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
     addCommand(AddCommand(logger: _logger));
     addCommand(SetCommand(logger: _logger));
     addCommand(SetupCommand(logger: _logger));
+    addCommand(SyncCommand(logger: _logger));
     addCommand(DoctorCommand(logger: _logger));
     addCommand(UpdateCommand(version: packageVersion, logger: _logger));
   }
