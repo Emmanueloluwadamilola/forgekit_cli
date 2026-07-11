@@ -1,0 +1,7 @@
+.dart_tool/
+.packages
+build/
+coverage/
+pubspec_overrides.yaml
+*.log
+.DS_Store

@@ -1,0 +1,16 @@
+import 'package:flutter/material.dart';
+
+import 'core/di/core_module_container.dart';
+import 'core/presentation/app/app.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Wire up the get_it/injectable dependency graph.
+  await configureDependencies();
+
+  // Register cross-cutting services here, e.g.:
+  // await getIt<NotificationService>().init();
+
+  runApp(const App());
+}

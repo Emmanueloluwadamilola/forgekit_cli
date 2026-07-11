@@ -1,0 +1,19 @@
+name: forge_widget
+description: >-
+  Generates a single shared design-system StatelessWidget under
+  lib/core/presentation/widgets/ per the Forge Flutter Architecture Standard.
+version: 0.1.0+1
+
+environment:
+  mason: ">=0.1.0 <1.0.0"
+
+vars:
+  name:
+    type: string
+    description: The widget name (PascalCase class, snake_case file).
+    prompt: What is the widget name?
+  projectName:
+    type: string
+    description: The Dart package name used in `package:<projectName>/...` imports.
+    default: app
+    prompt: What is the Dart package name?

@@ -1,0 +1,10 @@
+include: package:lints/recommended.yaml
+
+analyzer:
+  exclude:
+    - bricks/**
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - require_trailing_commas

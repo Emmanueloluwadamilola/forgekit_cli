@@ -1,0 +1,10 @@
+name: forge_widget_hooks
+description: Lifecycle hooks for the forge_widget brick.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  mason: ^0.1.0-dev.59

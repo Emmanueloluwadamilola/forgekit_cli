@@ -1,0 +1,19 @@
+name: forge_service
+description: >-
+  Generates a cross-cutting singleton service in lib/services/ registered with
+  get_it/injectable, per §6 of the Forge Flutter Architecture Standard.
+version: 0.1.0+1
+
+environment:
+  mason: ">=0.1.0 <1.0.0"
+
+vars:
+  name:
+    type: string
+    description: The service name (e.g. notification -> NotificationService).
+    prompt: What is the service name?
+  projectName:
+    type: string
+    description: The Dart package name used in `package:<projectName>/...` imports.
+    default: app
+    prompt: What is the Dart package name?

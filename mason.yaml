@@ -1,0 +1,11 @@
+# Registers the Forge bricks for local use.
+# Run `mason get` in this directory, then `mason make <brick>`.
+bricks:
+  forge_app:
+    path: bricks/forge_app
+  forge_feature:
+    path: bricks/forge_feature
+  forge_widget:
+    path: bricks/forge_widget
+  forge_service:
+    path: bricks/forge_service

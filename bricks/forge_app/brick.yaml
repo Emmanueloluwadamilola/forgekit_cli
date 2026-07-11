@@ -1,0 +1,20 @@
+name: forge_app
+description: >-
+  Bootstraps a new Forge Flutter project skeleton (lib/core scaffolding,
+  main.dart and a pubspec.yaml with the locked dependency versions) conforming
+  to the Forge Flutter Architecture Standard.
+version: 0.1.0+1
+
+environment:
+  mason: ">=0.1.0 <1.0.0"
+
+vars:
+  name:
+    type: string
+    description: The project / package name (snake_case).
+    prompt: What is the project name?
+  org:
+    type: string
+    description: The organization identifier (reverse-domain).
+    default: com.forgecyberlabs
+    prompt: What is the organization identifier?
