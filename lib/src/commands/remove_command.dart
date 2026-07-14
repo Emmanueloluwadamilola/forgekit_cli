@@ -15,7 +15,7 @@ class RemoveCommand extends Command<int> {
   String get name => 'remove';
 
   @override
-  String get description => 'Remove generated ForgeKit resources.';
+  String get description => 'Remove generated Flutter ForgeKit CLI resources.';
 }
 
 class _RemoveFeatureCommand extends Command<int> {

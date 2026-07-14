@@ -1,7 +1,7 @@
 name: forgekit
 description: >-
-  A command-line tool that wraps Mason to scaffold Flutter code following the
-  ForgeKit Architecture Standard.
+  Flutter ForgeKit CLI wraps Mason to scaffold Flutter code following a
+  configurable architecture standard.
 version: 0.1.0
 publish_to: none
 

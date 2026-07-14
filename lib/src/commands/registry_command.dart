@@ -17,7 +17,8 @@ class RegistryCommand extends Command<int> {
   String get name => 'registry';
 
   @override
-  String get description => 'Manage a shared Git-backed ForgeKit registry.';
+  String get description =>
+      'Manage a shared Git-backed Flutter ForgeKit CLI registry.';
 }
 
 class _RegistryConnectCommand extends Command<int> {
@@ -34,7 +35,8 @@ class _RegistryConnectCommand extends Command<int> {
   String get name => 'connect';
 
   @override
-  String get description => 'Connect ForgeKit to a shared registry Git repo.';
+  String get description =>
+      'Connect Flutter ForgeKit CLI to a shared registry Git repo.';
 
   @override
   String get invocation => 'forgekit registry connect <git-url> [--path <dir>]';
@@ -76,7 +78,7 @@ class _RegistryPushCommand extends Command<int> {
     argParser.addOption(
       'message',
       abbr: 'm',
-      defaultsTo: 'Sync ForgeKit registry',
+      defaultsTo: 'Sync Flutter ForgeKit CLI registry',
       help: 'Commit message for registry changes.',
     );
   }

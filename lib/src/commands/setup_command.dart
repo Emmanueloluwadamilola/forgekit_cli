@@ -5,7 +5,7 @@ import '../setup_service.dart';
 
 /// `forgekit setup`
 ///
-/// Installs required local tooling and registers ForgeKit's bundled bricks.
+/// Installs required local tooling and registers bundled bricks.
 class SetupCommand extends Command<int> {
   SetupCommand({Logger? logger}) : _logger = logger ?? Logger();
 
@@ -16,7 +16,7 @@ class SetupCommand extends Command<int> {
 
   @override
   String get description =>
-      'Install local tooling and register ForgeKit Mason bricks.';
+      'Install tooling and register Flutter ForgeKit CLI Mason bricks.';
 
   @override
   Future<int> run() => runSetup(logger: _logger);

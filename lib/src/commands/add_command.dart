@@ -20,7 +20,7 @@ import '../widget_registry_service.dart';
 /// `forgekit add ...`
 ///
 /// Parent command grouping the artifact-generation sub-commands that operate on
-/// an existing ForgeKit project (run from the project root).
+/// an existing Flutter ForgeKit CLI project (run from the project root).
 class AddCommand extends Command<int> {
   AddCommand({Logger? logger}) : _logger = logger ?? Logger() {
     addSubcommand(_AddFeatureCommand(logger: _logger));
@@ -76,7 +76,8 @@ class _AddFeatureCommand extends Command<int> {
   String get name => 'feature';
 
   @override
-  String get description => 'Generate a Clean Architecture feature module.';
+  String get description =>
+      'Generate a feature for the project architecture profile.';
 
   @override
   String get invocation =>
@@ -100,19 +101,32 @@ class _AddFeatureCommand extends Command<int> {
       return 1;
     }
     final config = loadForgeKitConfig(root: root);
-    final router = args['router'] as String? ?? config.router;
+    final requestedRouter = args['router'] as String?;
+    if (config.architecture == 'modular' && requestedRouter != null) {
+      _logger.err(
+        '--router is not available for modular projects because the module '
+        'owns its routes.',
+      );
+      return 1;
+    }
+    final router = requestedRouter ?? config.router;
     final stateManagement = config.stateManagement;
     // The brick's `useRouter` var means "this project uses named routes" — true
     // for the default `named` style, false when go_router is chosen.
     final useRouter = router == 'named';
     final projectName = detectProjectName(root: root);
+    final featureBrick = switch (config.architecture) {
+      'mvvm' => 'forge_feature_mvvm',
+      'modular' => 'forge_feature_modular',
+      _ => 'forge_feature',
+    };
 
     final progress = _logger.progress('Adding feature "$name"');
 
     final exitCode = await runMason(
       [
         'make',
-        'forge_feature',
+        featureBrick,
         '--name',
         name,
         '--useRouter',
@@ -122,7 +136,7 @@ class _AddFeatureCommand extends Command<int> {
         ...stateManagementMasonFlags(stateManagement),
         // Supply every brick var so Mason never stops for an interactive
         // prompt (a hidden prompt behind our spinner looks like a hang).
-        // ForgeKit runs build_runner itself below, so the brick must not.
+        // Flutter ForgeKit CLI runs build_runner, so the brick must not.
         '--runBuildRunner',
         'false',
         '-o',
@@ -134,6 +148,34 @@ class _AddFeatureCommand extends Command<int> {
     if (exitCode != 0) {
       progress.fail('Failed to add feature "$name".');
       return 1;
+    }
+
+    if (config.architecture == 'mvvm' && useRouter) {
+      final emptyRoutesFile = File(
+        p.join(
+          root.path,
+          'lib',
+          'ui',
+          _snakeCase(name),
+          '${_snakeCase(name)}_routes.dart',
+        ),
+      );
+      if (emptyRoutesFile.existsSync() &&
+          emptyRoutesFile.readAsStringSync().trim().isEmpty) {
+        await emptyRoutesFile.delete();
+      }
+    }
+
+    if (config.architecture == 'modular') {
+      final registered = _registerModularFeature(root: root, feature: name);
+      if (!registered) {
+        progress.fail('Generated feature, but could not register its module.');
+        _logger.err(
+          'Expected the marker `// forgekit:modules` in '
+          'lib/app/app_module.dart.',
+        );
+        return 1;
+      }
     }
     progress.complete('Added feature "$name".');
 
@@ -308,7 +350,7 @@ class _AddServiceCommand extends Command<int> {
 ///
 /// Downloads the font's available static weights from Google Fonts into
 /// `assets/fonts/`, registers them in `pubspec.yaml`, and sets it as the app's
-/// `fontFamily`. Run from the root of an existing ForgeKit project.
+/// `fontFamily`. Run from a Flutter ForgeKit CLI project root.
 class _AddFontCommand extends Command<int> {
   _AddFontCommand({Logger? logger}) : _logger = logger ?? Logger();
 
@@ -1108,6 +1150,44 @@ Future<int> _runBuildRunner(Logger logger, {String? workingDirectory}) async {
     progress.fail('Could not start the dart executable for build_runner.');
     return 1;
   }
+}
+
+bool _registerModularFeature({
+  required Directory root,
+  required String feature,
+}) {
+  final snake = _snakeCase(feature);
+  final camel = _pascalCase(feature);
+  final moduleName = camel.isEmpty
+      ? ''
+      : '${camel[0].toLowerCase()}${camel.substring(1)}Module';
+  final file = File(p.join(root.path, 'lib', 'app', 'app_module.dart'));
+  if (!file.existsSync() || moduleName.isEmpty) return false;
+
+  var content = file.readAsStringSync();
+  const marker = '// forgekit:modules';
+  if (!content.contains(marker)) return false;
+
+  final import = "import '../modules/$snake/${snake}_module.dart';";
+  if (!content.contains(import)) {
+    final imports = RegExp(r"^import '.+';\s*$", multiLine: true)
+        .allMatches(content)
+        .toList();
+    if (imports.isEmpty) return false;
+    final lastImport = imports.last;
+    content = content.replaceRange(
+      lastImport.end,
+      lastImport.end,
+      '\n$import',
+    );
+  }
+
+  final registration = '..module($moduleName)';
+  if (!content.contains(registration)) {
+    content = content.replaceFirst(marker, '$registration\n      $marker');
+  }
+  file.writeAsStringSync(content);
+  return true;
 }
 
 /// Renders the UseCase file contents following the spec's UseCase pattern

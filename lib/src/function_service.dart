@@ -716,7 +716,7 @@ void _wireBlocOperation({
   const registrationMarker = '// forgekit:event-registrations';
   if (!content.contains(eventMarker) || !content.contains(registrationMarker)) {
     throw const _GenException(
-      'The Bloc manager is missing ForgeKit operation markers.',
+      'The Bloc manager is missing Flutter ForgeKit CLI operation markers.',
     );
   }
   content = content

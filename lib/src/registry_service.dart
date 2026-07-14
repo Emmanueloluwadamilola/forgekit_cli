@@ -58,7 +58,7 @@ Future<int> connectRegistry({
     RegistryConfig(url: url, path: registryPath),
   );
 
-  logger.success('Connected ForgeKit registry.');
+  logger.success('Connected Flutter ForgeKit CLI registry.');
   logger.info('Registry path: $registryPath');
   return 0;
 }
@@ -90,7 +90,7 @@ Future<int> pullRegistry({
 
 Future<int> pushRegistry({
   required Logger logger,
-  String message = 'Sync ForgeKit registry',
+  String message = 'Sync Flutter ForgeKit CLI registry',
 }) async {
   final config = await readRegistryConfig();
   if (config == null) {

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
+import 'package:path/path.dart' as p;
 
 import '../config_service.dart';
 import '../font_service.dart';
@@ -10,7 +11,7 @@ import '../utils.dart';
 /// `forgekit create ...`
 ///
 /// Parent command grouping project-creation sub-commands. Currently exposes a
-/// single `app` sub-command that scaffolds a brand-new ForgeKit Flutter project.
+/// single `app` sub-command that scaffolds a new Flutter project.
 class CreateCommand extends Command<int> {
   CreateCommand({Logger? logger}) : _logger = logger ?? Logger() {
     addSubcommand(_CreateAppCommand(logger: _logger));
@@ -22,7 +23,7 @@ class CreateCommand extends Command<int> {
   String get name => 'create';
 
   @override
-  String get description => 'Create a new ForgeKit Flutter project.';
+  String get description => 'Create a new Flutter ForgeKit CLI project.';
 }
 
 /// `forgekit create app <name> [--org com.forgecyberlabs]`
@@ -43,7 +44,11 @@ class _CreateAppCommand extends Command<int> {
         'router',
         help: 'Routing style for the generated app.',
         allowed: ['named', 'go_router'],
-        defaultsTo: 'named',
+      )
+      ..addOption(
+        'architecture',
+        help: 'Architecture profile used by the generated project.',
+        allowed: creatableArchitectureProfiles,
       )
       ..addOption(
         'state-management',
@@ -59,11 +64,12 @@ class _CreateAppCommand extends Command<int> {
 
   @override
   String get description =>
-      'Scaffold a new ForgeKit Flutter project from the forge_app brick.';
+      'Scaffold a Flutter project from a Flutter ForgeKit CLI profile.';
 
   @override
   String get invocation =>
       'forgekit create app <name> [--org <org>] [--font <FontName>] '
+      '[--architecture clean|mvvm|modular] '
       '[--router named|go_router] '
       '[--state-management provider|riverpod|bloc|cubit]';
 
@@ -87,7 +93,23 @@ class _CreateAppCommand extends Command<int> {
     final name = rest.first;
     final org = args['org'] as String;
     final font = args['font'] as String?;
-    final router = args['router'] as String;
+    final architecture = args['architecture'] as String? ??
+        _logger.chooseOne(
+          'Select architecture:',
+          choices: creatableArchitectureProfiles,
+          defaultValue: 'clean',
+        ) ??
+        'clean';
+    final requestedRouter = args['router'] as String?;
+    if (architecture == 'modular' && requestedRouter != null) {
+      _logger.err(
+        '--router cannot be combined with --architecture modular because '
+        'Flutter Modular owns routing.',
+      );
+      return 1;
+    }
+    final router =
+        architecture == 'modular' ? 'modular' : requestedRouter ?? 'named';
     final stateManagement = args['state-management'] as String? ??
         _logger.chooseOne(
           'Select state management:',
@@ -97,6 +119,11 @@ class _CreateAppCommand extends Command<int> {
         'provider';
     final useRouter = router == 'named';
     final stateFlags = stateManagementMasonFlags(stateManagement);
+    final appBrick = switch (architecture) {
+      'mvvm' => 'forge_app_mvvm',
+      'modular' => 'forge_app_modular',
+      _ => 'forge_app',
+    };
 
     final platforms = _logger.chooseAny(
       'Select target platforms to support:',
@@ -136,7 +163,7 @@ class _CreateAppCommand extends Command<int> {
     final exitCode = await runMason(
       [
         'make',
-        'forge_app',
+        appBrick,
         '-o',
         name,
         '--name',
@@ -157,14 +184,24 @@ class _CreateAppCommand extends Command<int> {
       return 1;
     }
 
+    final flutterSampleTest = File(
+      p.join(name, 'test', 'widget_test.dart'),
+    );
+    if (flutterSampleTest.existsSync()) {
+      await flutterSampleTest.delete();
+    }
+
     progress.complete('Created app "$name" in ./$name');
 
     try {
       await saveForgeKitConfig(
         root: Directory(name),
         config: ForgeKitConfig(
+          architecture: architecture,
           stateManagement: stateManagement,
           router: router,
+          dependencyInjection:
+              architecture == 'modular' ? 'flutter_modular' : 'injectable',
         ),
       );
     } on ConfigException catch (error) {

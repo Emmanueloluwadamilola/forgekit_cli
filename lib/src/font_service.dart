@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
-/// Downloads a Google Font and wires it into a ForgeKit project.
+/// Downloads a Google Font and wires it into a Flutter ForgeKit CLI project.
 ///
 /// The flow is fully deterministic once the files are fetched:
 ///   1. Download the available static weights as `.ttf` files into

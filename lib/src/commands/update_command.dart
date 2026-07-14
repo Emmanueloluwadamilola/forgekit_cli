@@ -15,7 +15,8 @@ class UpdateCommand extends Command<int> {
   String get name => 'update';
 
   @override
-  String get description => 'Update ForgeKit from the GitHub repository.';
+  String get description =>
+      'Update Flutter ForgeKit CLI from the GitHub repository.';
 
   @override
   Future<int> run() => runUpdate(logger: _logger);

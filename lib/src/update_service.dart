@@ -5,7 +5,7 @@ import 'package:mason_logger/mason_logger.dart';
 const forgekitGitUrl =
     'https://github.com/Emmanueloluwadamilola/forgekit_cli.git';
 
-/// Updates ForgeKit from the GitHub repository and refreshes local setup.
+/// Updates Flutter ForgeKit CLI from GitHub and refreshes local setup.
 Future<int> runUpdate({Logger? logger}) async {
   final log = logger ?? Logger();
 
@@ -13,7 +13,7 @@ Future<int> runUpdate({Logger? logger}) async {
     'dart',
     ['pub', 'global', 'activate', '--source', 'git', forgekitGitUrl],
     logger: log,
-    failureMessage: 'Failed to update ForgeKit from GitHub.',
+    failureMessage: 'Failed to update Flutter ForgeKit CLI from GitHub.',
   );
   if (updateExit != 0) return updateExit;
 
@@ -21,14 +21,14 @@ Future<int> runUpdate({Logger? logger}) async {
     'dart',
     ['pub', 'global', 'run', 'forgekit:forgekit', 'setup'],
     logger: log,
-    failureMessage: 'ForgeKit updated, but setup failed.',
+    failureMessage: 'Flutter ForgeKit CLI updated, but setup failed.',
   );
   if (setupExit != 0) {
     log.info('Try running setup manually: forgekit setup');
     return setupExit;
   }
 
-  log.success('ForgeKit updated from GitHub.');
+  log.success('Flutter ForgeKit CLI updated from GitHub.');
   return 0;
 }
 

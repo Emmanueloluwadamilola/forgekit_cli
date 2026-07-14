@@ -1,0 +1,41 @@
+name: forge_feature_mvvm
+description: Generates a feature for Flutter ForgeKit CLI's MVVM profile.
+version: 0.1.0+1
+
+environment:
+  mason: ">=0.1.0 <1.0.0"
+
+vars:
+  name:
+    type: string
+    description: The feature name.
+    prompt: What is the feature name?
+  projectName:
+    type: string
+    description: The Dart package name used in package imports.
+    default: app
+    prompt: What is the Dart package name?
+  useRouter:
+    type: boolean
+    default: true
+    prompt: Use named routes?
+  runBuildRunner:
+    type: boolean
+    default: false
+    prompt: Run build_runner now?
+  useProvider:
+    type: boolean
+    default: true
+    prompt: Use Provider state management?
+  useRiverpod:
+    type: boolean
+    default: false
+    prompt: Use Riverpod state management?
+  useBloc:
+    type: boolean
+    default: false
+    prompt: Use Bloc state management?
+  useCubit:
+    type: boolean
+    default: false
+    prompt: Use Cubit state management?

@@ -65,7 +65,7 @@ class PubWorkspace {
     if (flutterOnly && !match.isFlutter) {
       throw WorkspaceException(
         'Workspace package "${match.name}" is not a Flutter package. '
-        'ForgeKit project commands must target a Flutter package.',
+        'Flutter ForgeKit CLI project commands must target a Flutter package.',
       );
     }
     return match;

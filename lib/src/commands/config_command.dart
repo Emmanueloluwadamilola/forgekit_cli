@@ -43,7 +43,8 @@ class _ConfigShowCommand extends _ConfigLeafCommand {
   String get name => 'show';
 
   @override
-  String get description => 'Print the resolved ForgeKit configuration.';
+  String get description =>
+      'Print the resolved Flutter ForgeKit CLI configuration.';
 
   @override
   Future<int> run() async {

@@ -3,8 +3,16 @@
 bricks:
   forge_app:
     path: bricks/forge_app
+  forge_app_mvvm:
+    path: bricks/forge_app_mvvm
+  forge_app_modular:
+    path: bricks/forge_app_modular
   forge_feature:
     path: bricks/forge_feature
+  forge_feature_mvvm:
+    path: bricks/forge_feature_mvvm
+  forge_feature_modular:
+    path: bricks/forge_feature_modular
   forge_widget:
     path: bricks/forge_widget
   forge_service:

@@ -14,21 +14,26 @@ Future<int> addFeatureTests({
   bool force = false,
   String? stateManagement,
 }) async {
-  final selectedStateManagement =
-      stateManagement ?? loadForgeKitConfig(root: root).stateManagement;
+  final config = loadForgeKitConfig(root: root);
+  final selectedStateManagement = stateManagement ?? config.stateManagement;
+  final architecture = config.architecture;
   final projectName = detectProjectName(root: root);
   final featureSnake = snakeCase(feature);
   final featurePascal = pascalCase(featureSnake);
+  final testPath = switch (architecture) {
+    'mvvm' => ['ui', featureSnake, 'view_models'],
+    'modular' => ['modules', featureSnake, 'presentation'],
+    _ => ['features', featureSnake, 'presentation', 'manager'],
+  };
   final testDir = Directory(
-    p.join(
-      root.path,
-      'test',
-      'features',
-      featureSnake,
-      'presentation',
-      'manager',
-    ),
+    p.joinAll([root.path, 'test', ...testPath]),
   );
+
+  final managerFile = switch (architecture) {
+    'mvvm' => '${featureSnake}_view_model_test.dart',
+    'modular' => '${featureSnake}_controller_test.dart',
+    _ => '${featureSnake}_provider_test.dart',
+  };
 
   final files = <String, String>{
     '${featureSnake}_state_test.dart': _featureStateTest(
@@ -36,12 +41,14 @@ Future<int> addFeatureTests({
       featureSnake: featureSnake,
       featurePascal: featurePascal,
       stateManagement: selectedStateManagement,
+      architecture: architecture,
     ),
-    '${featureSnake}_provider_test.dart': _featureProviderTest(
+    managerFile: _featureProviderTest(
       projectName: projectName,
       featureSnake: featureSnake,
       featurePascal: featurePascal,
       stateManagement: selectedStateManagement,
+      architecture: architecture,
     ),
   };
 
@@ -167,15 +174,30 @@ String _featureStateTest({
   required String featureSnake,
   required String featurePascal,
   required String stateManagement,
+  required String architecture,
 }) {
-  final statusImport = stateManagement == 'provider'
-      ? "import 'package:$projectName/core/presentation/manager/custom_state.dart';\n"
-      : '';
-  final statusType =
-      stateManagement == 'provider' ? 'ViewStatus' : '${featurePascal}Status';
+  final isClean = architecture != 'mvvm' && architecture != 'modular';
+  final statusImport = isClean
+      ? stateManagement == 'provider'
+          ? "import 'package:$projectName/core/presentation/manager/custom_state.dart';\n"
+          : ''
+      : architecture == 'mvvm'
+          ? "import 'package:$projectName/ui/core/view_models/view_state.dart';\n"
+          : "import 'package:$projectName/core/state/view_state.dart';\n";
+  final statusType = isClean && stateManagement != 'provider'
+      ? '${featurePascal}Status'
+      : 'ViewStatus';
+  final stateImport = switch (architecture) {
+    'mvvm' =>
+      'package:$projectName/ui/$featureSnake/view_models/${featureSnake}_state.dart',
+    'modular' =>
+      'package:$projectName/modules/$featureSnake/presentation/${featureSnake}_state.dart',
+    _ =>
+      'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart',
+  };
   return '''
 import 'package:flutter_test/flutter_test.dart';
-${statusImport}import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+${statusImport}import '$stateImport';
 
 void main() {
   group('${featurePascal}State', () {
@@ -208,7 +230,17 @@ String _featureProviderTest({
   required String featureSnake,
   required String featurePascal,
   required String stateManagement,
+  required String architecture,
 }) {
+  if (architecture == 'mvvm' || architecture == 'modular') {
+    return _profileManagerTest(
+      projectName: projectName,
+      featureSnake: featureSnake,
+      featurePascal: featurePascal,
+      stateManagement: stateManagement,
+      architecture: architecture,
+    );
+  }
   if (stateManagement == 'riverpod') {
     return '''
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -257,6 +289,61 @@ void main() {
       expect(provider.state.status, ViewStatus.idle);
       expect(provider.state.errorMessage, isNull);
     });
+  });
+}
+''';
+}
+
+String _profileManagerTest({
+  required String projectName,
+  required String featureSnake,
+  required String featurePascal,
+  required String stateManagement,
+  required String architecture,
+}) {
+  final isMvvm = architecture == 'mvvm';
+  final managerSuffix = isMvvm ? 'ViewModel' : 'Controller';
+  final managerType = '$featurePascal$managerSuffix';
+  final managerImport = isMvvm
+      ? 'package:$projectName/ui/$featureSnake/view_models/${featureSnake}_view_model.dart'
+      : 'package:$projectName/modules/$featureSnake/presentation/${featureSnake}_controller.dart';
+  final statusImport = isMvvm
+      ? 'package:$projectName/ui/core/view_models/view_state.dart'
+      : 'package:$projectName/core/state/view_state.dart';
+  final providerName = '${_camel(featureSnake)}${managerSuffix}Provider';
+
+  if (stateManagement == 'riverpod') {
+    return '''
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import '$managerImport';
+import '$statusImport';
+
+void main() {
+  test('$managerType starts idle', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    expect(container.read($providerName).status, ViewStatus.idle);
+  });
+}
+''';
+  }
+
+  final tearDown = stateManagement == 'provider'
+      ? 'addTearDown(manager.dispose);'
+      : 'addTearDown(manager.close);';
+  return '''
+import 'package:flutter_test/flutter_test.dart';
+import '$managerImport';
+import '$statusImport';
+
+void main() {
+  test('$managerType starts idle', () {
+    final manager = $managerType();
+    $tearDown
+
+    expect(manager.state.status, ViewStatus.idle);
   });
 }
 ''';

@@ -8,18 +8,22 @@ import 'package:yaml_edit/yaml_edit.dart';
 
 const _bricks = <String, String>{
   'forge_app': 'bricks/forge_app',
+  'forge_app_mvvm': 'bricks/forge_app_mvvm',
+  'forge_app_modular': 'bricks/forge_app_modular',
   'forge_feature': 'bricks/forge_feature',
+  'forge_feature_mvvm': 'bricks/forge_feature_mvvm',
+  'forge_feature_modular': 'bricks/forge_feature_modular',
   'forge_widget': 'bricks/forge_widget',
   'forge_service': 'bricks/forge_service',
 };
 
-/// Installs ForgeKit's local tool dependencies and registers bundled bricks.
+/// Installs Flutter ForgeKit CLI's local dependencies and bundled bricks.
 Future<int> runSetup({Logger? logger}) async {
   final log = logger ?? Logger();
 
   final packageRoot = await _resolvePackageRoot();
   if (packageRoot == null) {
-    log.err('Could not locate the installed ForgeKit package.');
+    log.err('Could not locate the installed Flutter ForgeKit CLI package.');
     log.info(
       'Try reinstalling with: dart pub global activate --source git '
       'https://github.com/Emmanueloluwadamilola/forgekit_cli.git',
@@ -40,7 +44,7 @@ Future<int> runSetup({Logger? logger}) async {
       'The installed package is missing bundled bricks: ${missingBricks.join(', ')}.',
     );
     log.info(
-      'Reinstall ForgeKit from the GitHub repository and run setup again.',
+      'Reinstall Flutter ForgeKit CLI from GitHub and run setup again.',
     );
     return 1;
   }
@@ -72,7 +76,7 @@ Future<int> runSetup({Logger? logger}) async {
 
   log
     ..info('')
-    ..success('ForgeKit is ready.')
+    ..success('Flutter ForgeKit CLI is ready.')
     ..info('Try: forgekit create app my_app');
   return 0;
 }

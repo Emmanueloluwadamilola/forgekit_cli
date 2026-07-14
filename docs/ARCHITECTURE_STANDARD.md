@@ -1,6 +1,6 @@
-# ForgeKit Flutter Architecture Standard
+# Flutter ForgeKit CLI Architecture Standard
 
-This document is the **single source of truth** for how ForgeKit Flutter apps are structured.
+This document is the **single source of truth** for how Flutter ForgeKit CLI apps are structured.
 Every generator (Mason brick, `forgekit` CLI, VSCode extension) produces code that conforms to
 this standard. It was distilled from a review of seven production apps: `pof_customer`,
 `pof_vendor`, `runnars_mobile`, `my-cross-river-app`, `tantita_mobile`, `airwifi_mobile`,
@@ -9,14 +9,30 @@ and `the-lex-app-mobile`.
 > If a generator and this document disagree, this document wins. Update the document first,
 > then the generators.
 
+## Architecture profiles
+
+Flutter ForgeKit CLI supports three project-wide architecture profiles. The selected value
+is stored in `forgekit.yaml` and controls both app and feature generation.
+
+| Profile | Primary organization | Routing and dependency injection |
+| --- | --- | --- |
+| `clean` | Feature-first `data/domain/presentation` layers | Named routes or GoRouter; GetIt and Injectable |
+| `mvvm` | `ui/<feature>` Views and ViewModels over `data` repositories and services | Named routes or GoRouter; GetIt and Injectable |
+| `modular` | Self-contained `modules/<feature>` packages | Flutter Modular v7 routes and module-scoped dependencies |
+
+The detailed contract below describes the default `clean` profile. MVVM uses
+Flutter's recommended UI and data-layer separation with a View paired to a
+ViewModel. Modular features own their mount path, routes, data dependencies,
+controller, state, and page; the root `appModule` is the composition map.
+
 ---
 
 ## 1. Stack (locked)
 
 | Concern            | Choice                                                              | Notes |
 |--------------------|--------------------------------------------------------------------|-------|
-| Architecture       | Clean Architecture, feature-first                                  | data / domain / presentation inside each feature |
-| State management   | Provider, Riverpod, Bloc, or Cubit                                  | selected project-wide in `forgekit.yaml`; Provider uses the ForgeKit `CustomProvider` base and every option uses an immutable paired `*State` object |
+| Architecture       | Clean Architecture, feature-first (default profile)                | data / domain / presentation inside each feature |
+| State management   | Provider, Riverpod, Bloc, or Cubit                                  | selected project-wide in `forgekit.yaml`; Provider uses the Flutter ForgeKit CLI `CustomProvider` base and every option uses an immutable paired `*State` object |
 | Dependency injection | `get_it` + `injectable`                                          | one `@module` per feature, generated container |
 | Networking         | `dio` + `retrofit` + `awesome_dio_interceptor`                     | 401/token-refresh interceptor, `ApiResult<T>` wrapper |
 | Serialization      | `json_serializable` + `json_annotation`                            | no `freezed`; explicit DTO → domain conversion |

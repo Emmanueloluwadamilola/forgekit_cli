@@ -12,8 +12,8 @@ void main() {
       const original = ForgeKitConfig(
         architecture: 'modular',
         stateManagement: 'riverpod',
-        router: 'go_router',
-        dependencyInjection: 'riverpod',
+        router: 'modular',
+        dependencyInjection: 'flutter_modular',
         models: 'freezed',
         apiClient: 'dio',
         minimumCoverage: 90,
@@ -25,7 +25,8 @@ void main() {
 
       expect(parsed.architecture, 'modular');
       expect(parsed.stateManagement, 'riverpod');
-      expect(parsed.router, 'go_router');
+      expect(parsed.router, 'modular');
+      expect(parsed.dependencyInjection, 'flutter_modular');
       expect(parsed.minimumCoverage, 90);
       expect(parsed.format, isFalse);
       expect(parsed.runBuildRunner, isFalse);
@@ -115,6 +116,59 @@ dependencies:
       );
       expect(detectForgeKitConfig(root: root).stateManagement, 'cubit');
     });
+
+    test('detects the MVVM directory profile', () {
+      _writePubspec(root, '''
+name: sample_app
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.2
+''');
+      Directory(p.join(root.path, 'lib', 'ui')).createSync(recursive: true);
+      Directory(p.join(root.path, 'lib', 'data')).createSync(recursive: true);
+
+      final config = detectForgeKitConfig(root: root);
+
+      expect(config.architecture, 'mvvm');
+      expect(config.stateManagement, 'provider');
+    });
+
+    test('detects Flutter Modular routing and dependency injection', () {
+      _writePubspec(root, '''
+name: sample_app
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_modular: ^7.1.0
+  flutter_bloc: ^9.1.0
+''');
+
+      final config = detectForgeKitConfig(root: root);
+
+      expect(config.architecture, 'modular');
+      expect(config.router, 'modular');
+      expect(config.dependencyInjection, 'flutter_modular');
+    });
+  });
+
+  test('modular create rejects a separate router option', () async {
+    final runner = ForgeCommandRunner(logger: Logger(level: Level.quiet));
+
+    expect(
+      await runner.run([
+        'create',
+        'app',
+        'sample_app',
+        '--architecture',
+        'modular',
+        '--router',
+        'named',
+        '--state-management',
+        'provider',
+      ]),
+      1,
+    );
   });
 
   test('init supports dry-run without leaving forgekit.yaml behind', () async {

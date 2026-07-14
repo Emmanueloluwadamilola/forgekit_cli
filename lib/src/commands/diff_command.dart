@@ -14,7 +14,7 @@ class DiffCommand extends Command<int> {
 
   @override
   String get description =>
-      'Show drift from the latest ForgeKit generation transaction.';
+      'Show drift from the latest Flutter ForgeKit CLI generation.';
 
   @override
   Future<int> run() async {

@@ -6,7 +6,7 @@ import '../utils.dart';
 
 /// `forgekit doctor [--ci]`
 ///
-/// Verifies the project conforms to the ForgeKit Architecture Standard.
+/// Verifies the project conforms to the Flutter ForgeKit CLI standard.
 class DoctorCommand extends Command<int> {
   DoctorCommand({Logger? logger}) : _logger = logger ?? Logger() {
     argParser.addFlag(
@@ -28,7 +28,7 @@ class DoctorCommand extends Command<int> {
 
   @override
   String get description =>
-      'Check the project against the ForgeKit Architecture Standard.';
+      'Check the project against the Flutter ForgeKit CLI Architecture Standard.';
 
   @override
   Future<int> run() async {

@@ -28,7 +28,7 @@ const packageVersion = '0.1.0';
 
 const _executableName = 'forgekit';
 const _description =
-    'Scaffold Flutter code that follows the ForgeKit Architecture Standard.';
+    'Flutter ForgeKit CLI scaffolds production-ready Flutter architecture.';
 
 /// The top-level [CommandRunner] for the `forgekit` CLI.
 ///
@@ -41,7 +41,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
     argParser.addFlag(
       'version',
       negatable: false,
-      help: 'Print the current ForgeKit version.',
+      help: 'Print the current Flutter ForgeKit CLI version.',
     );
     argParser.addOption(
       'package',
@@ -83,7 +83,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
           normalizeDryRunOption(normalizePackageOption(args));
       final topLevelResults = parse(normalizedArgs);
       if (topLevelResults['version'] == true) {
-        _logger.info('forgekit $packageVersion');
+        _logger.info('Flutter ForgeKit CLI $packageVersion (forgekit)');
         return 0;
       }
 

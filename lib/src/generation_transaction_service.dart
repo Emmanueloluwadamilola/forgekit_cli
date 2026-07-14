@@ -63,7 +63,7 @@ class GenerationTransaction {
       await _restoreSnapshot(root: root, before: _before, after: after);
       if (!success && changes.isNotEmpty) {
         logger.warn(
-          'The command failed. ForgeKit restored ${changes.length} project '
+          'The command failed. Flutter ForgeKit CLI restored ${changes.length} project '
           'change(s).',
         );
       } else if (dryRun) {
@@ -182,7 +182,9 @@ Future<int> showGenerationDiff({
 }) async {
   final transaction = await _loadLatestTransaction(root);
   if (transaction == null) {
-    logger.info('No ForgeKit generation transaction has been recorded yet.');
+    logger.info(
+      'No Flutter ForgeKit CLI generation transaction has been recorded yet.',
+    );
     return 0;
   }
 
@@ -217,7 +219,9 @@ Future<int> rollbackLatestGeneration({
 }) async {
   final transaction = await _loadLatestTransaction(root);
   if (transaction == null) {
-    logger.err('No ForgeKit generation transaction is available to roll back.');
+    logger.err(
+      'No Flutter ForgeKit CLI generation transaction is available to roll back.',
+    );
     return 1;
   }
 
@@ -446,7 +450,7 @@ List<GenerationChange> _changesFromTransaction(Map<String, dynamic> json) {
   final rawChanges = json['changes'];
   if (rawChanges is! List) {
     throw const GenerationTransactionException(
-      'The ForgeKit transaction is missing its change list.',
+      'The Flutter ForgeKit CLI transaction is missing its change list.',
     );
   }
   return rawChanges

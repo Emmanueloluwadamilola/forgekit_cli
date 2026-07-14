@@ -7,7 +7,7 @@ import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'utils.dart';
 
-/// Checks that a project conforms to the ForgeKit Architecture Standard.
+/// Checks that a project conforms to the Flutter ForgeKit CLI standard.
 ///
 /// Missing required files are reported as errors; naming / annotation drift as
 /// warnings. Exit code: non-zero when there are errors, or (with [ci]) any
@@ -20,7 +20,7 @@ Future<int> runDoctor({
 }) async {
   final projectName = detectProjectName(root: root);
   final config = loadForgeKitConfig(root: root);
-  logger.info('Forge doctor — checking "$projectName"');
+  logger.info('Flutter ForgeKit CLI doctor: checking "$projectName"');
   logger.info('');
 
   if (fix) {
@@ -28,6 +28,7 @@ Future<int> runDoctor({
       root: root,
       logger: logger,
       stateManagement: config.stateManagement,
+      architecture: config.architecture,
     );
     if (fixed > 0) {
       logger.info('');
@@ -38,32 +39,13 @@ Future<int> runDoctor({
 
   final issues = <_Issue>[];
 
-  // --- core scaffolding ---
-  final coreFiles = <String>[
-    'lib/core/di/core_module_container.dart',
-    'lib/core/domain/api/api_result.dart',
-    'lib/core/domain/usecase/use_case.dart',
-    if (config.stateManagement == 'provider') ...[
-      'lib/core/presentation/manager/custom_provider.dart',
-      'lib/core/presentation/manager/custom_state.dart',
-    ],
-  ];
-  for (final rel in coreFiles) {
-    if (!File(p.join(root.path, rel)).existsSync()) {
-      issues.add(_Issue.error('Missing core file: $rel'));
-    }
-  }
-
-  // --- features ---
-  final featuresDir = Directory(p.join(root.path, 'lib', 'features'));
-  if (!featuresDir.existsSync()) {
-    issues.add(_Issue.warn('No lib/features directory yet.'));
-  } else {
-    final featureDirs = featuresDir.listSync().whereType<Directory>().toList()
-      ..sort((a, b) => a.path.compareTo(b.path));
-    for (final fd in featureDirs) {
-      _checkFeature(fd, issues, config.stateManagement);
-    }
+  switch (config.architecture) {
+    case 'mvvm':
+      _checkMvvmProject(root, issues, config.stateManagement);
+    case 'modular':
+      _checkModularProject(root, issues);
+    default:
+      _checkCleanProject(root, issues, config.stateManagement);
   }
 
   // --- report ---
@@ -92,7 +74,14 @@ Future<int> _applyFixes({
   required Directory root,
   required Logger logger,
   required String stateManagement,
+  required String architecture,
 }) async {
+  if (architecture == 'mvvm' || architecture == 'modular') {
+    logger.info(
+      'No safe automatic repairs are available for the $architecture profile.',
+    );
+    return 0;
+  }
   final projectName = detectProjectName(root: root);
   var fixed = 0;
 
@@ -141,6 +130,152 @@ Future<int> _applyFixes({
     logger.info('No safe fixes were needed.');
   }
   return fixed;
+}
+
+void _checkCleanProject(
+  Directory root,
+  List<_Issue> issues,
+  String stateManagement,
+) {
+  final coreFiles = <String>[
+    'lib/core/di/core_module_container.dart',
+    'lib/core/domain/api/api_result.dart',
+    'lib/core/domain/usecase/use_case.dart',
+    if (stateManagement == 'provider') ...[
+      'lib/core/presentation/manager/custom_provider.dart',
+      'lib/core/presentation/manager/custom_state.dart',
+    ],
+  ];
+  _checkFiles(root, issues, coreFiles);
+
+  final featuresDir = Directory(p.join(root.path, 'lib', 'features'));
+  if (!featuresDir.existsSync()) {
+    issues.add(_Issue.warn('No lib/features directory yet.'));
+    return;
+  }
+  for (final directory in _sortedDirectories(featuresDir)) {
+    _checkFeature(directory, issues, stateManagement);
+  }
+}
+
+void _checkMvvmProject(
+  Directory root,
+  List<_Issue> issues,
+  String stateManagement,
+) {
+  _checkFiles(root, issues, [
+    'lib/config/di/dependencies.dart',
+    'lib/utils/result.dart',
+    'lib/ui/core/app/app.dart',
+    'lib/ui/core/view_models/view_state.dart',
+    if (stateManagement == 'provider')
+      'lib/ui/core/view_models/custom_provider.dart',
+  ]);
+
+  final ui = Directory(p.join(root.path, 'lib', 'ui'));
+  if (!ui.existsSync()) {
+    issues.add(_Issue.error('Missing MVVM UI directory: lib/ui'));
+    return;
+  }
+  final features = _sortedDirectories(ui)
+      .where((directory) => p.basename(directory.path) != 'core')
+      .toList();
+  if (features.isEmpty) {
+    issues.add(_Issue.warn('No MVVM features in lib/ui yet.'));
+    return;
+  }
+
+  for (final directory in features) {
+    final feature = p.basename(directory.path);
+    final pascal = pascalCase(feature);
+    _checkDeclarations(root, issues, feature, {
+      'lib/ui/$feature/view_models/${feature}_view_model.dart':
+          'class ${pascal}ViewModel',
+      'lib/ui/$feature/view_models/${feature}_state.dart':
+          'class ${pascal}State',
+      'lib/ui/$feature/widgets/${feature}_screen.dart': 'class ${pascal}Screen',
+      'lib/data/services/${feature}_api_service.dart':
+          'class ${pascal}ApiService',
+      'lib/data/repositories/${feature}_repository.dart':
+          'class ${pascal}Repository',
+      'lib/config/di/${feature}_module.dart': 'class ${pascal}Module',
+    });
+  }
+}
+
+void _checkModularProject(Directory root, List<_Issue> issues) {
+  _checkFiles(root, issues, [
+    'lib/app/app.dart',
+    'lib/app/app_module.dart',
+    'lib/core/state/view_state.dart',
+  ]);
+
+  final modules = Directory(p.join(root.path, 'lib', 'modules'));
+  if (!modules.existsSync()) {
+    issues.add(_Issue.warn('No modules in lib/modules yet.'));
+    return;
+  }
+  final appModule = File(p.join(root.path, 'lib', 'app', 'app_module.dart'));
+  final appModuleContent =
+      appModule.existsSync() ? appModule.readAsStringSync() : '';
+  for (final directory in _sortedDirectories(modules)) {
+    final feature = p.basename(directory.path);
+    final pascal = pascalCase(feature);
+    final camel = camelCase(feature);
+    _checkDeclarations(root, issues, feature, {
+      'lib/modules/$feature/${feature}_module.dart': 'final ${camel}Module',
+      'lib/modules/$feature/data/${feature}_api_service.dart':
+          'class ${pascal}ApiService',
+      'lib/modules/$feature/data/${feature}_repository.dart':
+          'class ${pascal}Repository',
+      'lib/modules/$feature/presentation/${feature}_controller.dart':
+          'class ${pascal}Controller',
+      'lib/modules/$feature/presentation/${feature}_state.dart':
+          'class ${pascal}State',
+      'lib/modules/$feature/presentation/${feature}_page.dart':
+          'class ${pascal}Page',
+    });
+    if (!appModuleContent.contains('..module(${camel}Module)')) {
+      issues.add(
+        _Issue.error('[$feature] module is not mounted in app_module.dart'),
+      );
+    }
+  }
+}
+
+void _checkFiles(
+  Directory root,
+  List<_Issue> issues,
+  Iterable<String> files,
+) {
+  for (final relative in files) {
+    if (!File(p.join(root.path, relative)).existsSync()) {
+      issues.add(_Issue.error('Missing core file: $relative'));
+    }
+  }
+}
+
+void _checkDeclarations(
+  Directory root,
+  List<_Issue> issues,
+  String feature,
+  Map<String, String> expected,
+) {
+  expected.forEach((relative, declaration) {
+    final file = File(p.join(root.path, relative));
+    if (!file.existsSync()) {
+      issues.add(_Issue.error('[$feature] missing $relative'));
+    } else if (!file.readAsStringSync().contains(declaration)) {
+      issues.add(
+        _Issue.warn('[$feature] $relative should declare `$declaration`'),
+      );
+    }
+  });
+}
+
+List<Directory> _sortedDirectories(Directory parent) {
+  return parent.listSync().whereType<Directory>().toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
 }
 
 int _fixFeature({

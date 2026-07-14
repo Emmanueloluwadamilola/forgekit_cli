@@ -15,7 +15,7 @@ class RenameCommand extends Command<int> {
   String get name => 'rename';
 
   @override
-  String get description => 'Rename generated ForgeKit resources.';
+  String get description => 'Rename generated Flutter ForgeKit CLI resources.';
 }
 
 class _RenameFeatureCommand extends Command<int> {

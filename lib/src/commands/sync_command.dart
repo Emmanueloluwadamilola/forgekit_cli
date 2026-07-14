@@ -17,7 +17,8 @@ class SyncCommand extends Command<int> {
   String get name => 'sync';
 
   @override
-  String get description => 'Sync reusable ForgeKit resources for later use.';
+  String get description =>
+      'Sync reusable Flutter ForgeKit CLI resources for later use.';
 }
 
 /// `forgekit sync widget <name> [--path <file>]`

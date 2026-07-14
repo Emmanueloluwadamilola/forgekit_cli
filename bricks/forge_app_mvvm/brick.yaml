@@ -1,0 +1,36 @@
+name: forge_app_mvvm
+description: Generates a Flutter app following Flutter's recommended MVVM structure.
+version: 0.1.0+1
+
+environment:
+  mason: ">=0.1.0 <1.0.0"
+
+vars:
+  name:
+    type: string
+    description: The project name.
+    prompt: What is the project name?
+  org:
+    type: string
+    default: com.forgecyberlabs
+    prompt: What is the organization identifier?
+  useRouter:
+    type: boolean
+    default: true
+    prompt: Use named routes?
+  useProvider:
+    type: boolean
+    default: true
+    prompt: Use Provider state management?
+  useRiverpod:
+    type: boolean
+    default: false
+    prompt: Use Riverpod state management?
+  useBloc:
+    type: boolean
+    default: false
+    prompt: Use Bloc state management?
+  useCubit:
+    type: boolean
+    default: false
+    prompt: Use Cubit state management?

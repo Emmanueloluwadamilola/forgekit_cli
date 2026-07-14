@@ -5,10 +5,16 @@ import 'package:yaml/yaml.dart';
 
 const forgeKitConfigFileName = 'forgekit.yaml';
 
-const supportedProfiles = ['lean', 'clean', 'modular', 'legacy'];
+const creatableArchitectureProfiles = ['clean', 'mvvm', 'modular'];
+const supportedProfiles = ['lean', ...creatableArchitectureProfiles, 'legacy'];
 const supportedStateManagement = ['provider', 'riverpod', 'bloc', 'cubit'];
-const supportedRouters = ['named', 'go_router'];
-const supportedDependencyInjection = ['injectable', 'get_it', 'riverpod'];
+const supportedRouters = ['named', 'go_router', 'modular'];
+const supportedDependencyInjection = [
+  'injectable',
+  'get_it',
+  'riverpod',
+  'flutter_modular',
+];
 const supportedModels = ['json_serializable', 'freezed'];
 const supportedApiClients = ['retrofit', 'dio', 'http'];
 
@@ -131,7 +137,9 @@ class ForgeKitConfig {
       'generation.build_runner' ||
       'build_runner' =>
         copyWith(runBuildRunner: _parseBoolean(key, value)),
-      _ => throw ConfigException('Unknown ForgeKit configuration key: $key'),
+      _ => throw ConfigException(
+          'Unknown Flutter ForgeKit CLI configuration key: $key',
+        ),
     };
     updated.validate();
     return updated;
@@ -249,16 +257,28 @@ ForgeKitConfig detectForgeKitConfig({
 
   final detectedState =
       stateManagement ?? _detectStateManagement(root, dependencyNames);
-  final detectedArchitecture =
-      architecture ?? (_hasCleanArchitecture(root) ? 'clean' : 'lean');
-  final router = dependencyNames.contains('go_router') ? 'go_router' : 'named';
-  final dependencyInjection = dependencyNames.contains('injectable')
-      ? 'injectable'
-      : dependencyNames.contains('get_it')
-          ? 'get_it'
-          : detectedState == 'riverpod'
-              ? 'riverpod'
-              : 'get_it';
+  final detectedArchitecture = architecture ??
+      (dependencyNames.contains('flutter_modular')
+          ? 'modular'
+          : _hasMvvmArchitecture(root)
+              ? 'mvvm'
+              : _hasCleanArchitecture(root)
+                  ? 'clean'
+                  : 'lean');
+  final router = dependencyNames.contains('flutter_modular')
+      ? 'modular'
+      : dependencyNames.contains('go_router')
+          ? 'go_router'
+          : 'named';
+  final dependencyInjection = dependencyNames.contains('flutter_modular')
+      ? 'flutter_modular'
+      : dependencyNames.contains('injectable')
+          ? 'injectable'
+          : dependencyNames.contains('get_it')
+              ? 'get_it'
+              : detectedState == 'riverpod'
+                  ? 'riverpod'
+                  : 'get_it';
   final models =
       dependencyNames.contains('freezed') ? 'freezed' : 'json_serializable';
   final apiClient = dependencyNames.contains('retrofit')
@@ -275,6 +295,11 @@ ForgeKitConfig detectForgeKitConfig({
     models: models,
     apiClient: apiClient,
   );
+}
+
+bool _hasMvvmArchitecture(Directory root) {
+  return Directory(p.join(root.path, 'lib', 'ui')).existsSync() &&
+      Directory(p.join(root.path, 'lib', 'data')).existsSync();
 }
 
 String _detectStateManagement(Directory root, Set<String> dependencies) {
@@ -356,7 +381,7 @@ void _validateChoice(String key, String value, List<String> choices) {
 }
 
 String _normalizeStateManagement(String value) {
-  // ForgeKit originally exposed its Provider-based profile as "forgekit".
+  // Flutter ForgeKit CLI originally exposed Provider as "forgekit".
   // Keep existing project configuration readable after the public rename.
   return value == 'forgekit' ? 'provider' : value;
 }

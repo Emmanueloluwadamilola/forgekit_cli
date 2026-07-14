@@ -1,0 +1,41 @@
+name: forge_feature_modular
+description: Generates a self-contained Flutter Modular v7 feature module.
+version: 0.1.0+1
+
+environment:
+  mason: ">=0.1.0 <1.0.0"
+
+vars:
+  name:
+    type: string
+    description: The feature name.
+    prompt: What is the feature name?
+  projectName:
+    type: string
+    description: The Dart package name used in package imports.
+    default: app
+    prompt: What is the Dart package name?
+  useRouter:
+    type: boolean
+    default: false
+    prompt: Use named routes?
+  runBuildRunner:
+    type: boolean
+    default: false
+    prompt: Run build_runner now?
+  useProvider:
+    type: boolean
+    default: true
+    prompt: Use Provider state management?
+  useRiverpod:
+    type: boolean
+    default: false
+    prompt: Use Riverpod state management?
+  useBloc:
+    type: boolean
+    default: false
+    prompt: Use Bloc state management?
+  useCubit:
+    type: boolean
+    default: false
+    prompt: Use Cubit state management?

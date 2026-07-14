@@ -20,7 +20,8 @@ class RollbackCommand extends Command<int> {
   String get name => 'rollback';
 
   @override
-  String get description => 'Roll back the latest ForgeKit generation.';
+  String get description =>
+      'Roll back the latest Flutter ForgeKit CLI generation.';
 
   @override
   Future<int> run() async {
