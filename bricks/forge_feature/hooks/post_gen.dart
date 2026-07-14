@@ -74,8 +74,7 @@ Future<void> run(HookContext context) async {
     '  2. Run code generation:',
   );
   logger.info('');
-  logger
-      .info('       dart run build_runner build --delete-conflicting-outputs');
+  logger.info('       dart run build_runner build');
   logger.info('');
 
   if (runBuildRunner) {
@@ -83,7 +82,7 @@ Future<void> run(HookContext context) async {
     try {
       final result = await Process.run(
         'dart',
-        ['run', 'build_runner', 'build', '--delete-conflicting-outputs'],
+        ['run', 'build_runner', 'build'],
         runInShell: true,
       );
       if (result.exitCode == 0) {

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+{{#useRiverpod}}import 'package:flutter_riverpod/flutter_riverpod.dart';
+{{/useRiverpod}}
 
 import 'core/di/core_module_container.dart';
 import 'core/presentation/app/app.dart';
@@ -12,5 +14,7 @@ Future<void> main() async {
   // Register cross-cutting services here, e.g.:
   // await getIt<NotificationService>().init();
 
-  runApp(const App());
+{{#useRiverpod}}  runApp(const ProviderScope(child: App()));
+{{/useRiverpod}}{{^useRiverpod}}  runApp(const App());
+{{/useRiverpod}}
 }

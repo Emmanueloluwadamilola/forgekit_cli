@@ -1,3 +1,4 @@
+{{#useProvider}}
 /// Lifecycle status for a view-state object.
 enum ViewStatus { idle, loading, success, error }
 
@@ -15,3 +16,4 @@ class CustomState {
   bool get isLoading => status == ViewStatus.loading;
   bool get hasError => status == ViewStatus.error;
 }
+{{/useProvider}}

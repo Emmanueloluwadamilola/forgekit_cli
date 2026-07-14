@@ -97,7 +97,7 @@ Future<int> addModel({
     ..info('  ${p.relative(dtoPath, from: root.path)}')
     ..info('')
     ..info('Next steps:')
-    ..info('  dart run build_runner build --delete-conflicting-outputs');
+    ..info('  dart run build_runner build');
   return 0;
 }
 

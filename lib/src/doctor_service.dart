@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'utils.dart';
 
@@ -18,11 +19,16 @@ Future<int> runDoctor({
   bool fix = false,
 }) async {
   final projectName = detectProjectName(root: root);
+  final config = loadForgeKitConfig(root: root);
   logger.info('Forge doctor — checking "$projectName"');
   logger.info('');
 
   if (fix) {
-    final fixed = await _applyFixes(root: root, logger: logger);
+    final fixed = await _applyFixes(
+      root: root,
+      logger: logger,
+      stateManagement: config.stateManagement,
+    );
     if (fixed > 0) {
       logger.info('');
       logger.info('Rechecking after fixes...');
@@ -33,12 +39,14 @@ Future<int> runDoctor({
   final issues = <_Issue>[];
 
   // --- core scaffolding ---
-  const coreFiles = [
+  final coreFiles = <String>[
     'lib/core/di/core_module_container.dart',
     'lib/core/domain/api/api_result.dart',
     'lib/core/domain/usecase/use_case.dart',
-    'lib/core/presentation/manager/custom_provider.dart',
-    'lib/core/presentation/manager/custom_state.dart',
+    if (config.stateManagement == 'provider') ...[
+      'lib/core/presentation/manager/custom_provider.dart',
+      'lib/core/presentation/manager/custom_state.dart',
+    ],
   ];
   for (final rel in coreFiles) {
     if (!File(p.join(root.path, rel)).existsSync()) {
@@ -54,7 +62,7 @@ Future<int> runDoctor({
     final featureDirs = featuresDir.listSync().whereType<Directory>().toList()
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final fd in featureDirs) {
-      _checkFeature(fd, issues);
+      _checkFeature(fd, issues, config.stateManagement);
     }
   }
 
@@ -83,6 +91,7 @@ Future<int> runDoctor({
 Future<int> _applyFixes({
   required Directory root,
   required Logger logger,
+  required String stateManagement,
 }) async {
   final projectName = detectProjectName(root: root);
   var fixed = 0;
@@ -92,9 +101,11 @@ Future<int> _applyFixes({
     'lib/core/di/core_module_container.dart': _coreModuleContainerTemplate(),
     'lib/core/domain/api/api_result.dart': _apiResultTemplate(),
     'lib/core/domain/usecase/use_case.dart': _useCaseTemplate(),
-    'lib/core/presentation/manager/custom_provider.dart':
-        _customProviderTemplate(),
-    'lib/core/presentation/manager/custom_state.dart': _customStateTemplate(),
+    if (stateManagement == 'provider') ...{
+      'lib/core/presentation/manager/custom_provider.dart':
+          _customProviderTemplate(),
+      'lib/core/presentation/manager/custom_state.dart': _customStateTemplate(),
+    },
   };
 
   for (final entry in files.entries) {
@@ -122,6 +133,7 @@ Future<int> _applyFixes({
       featureDir: fd,
       projectName: projectName,
       logger: logger,
+      stateManagement: stateManagement,
     );
   }
 
@@ -135,6 +147,7 @@ int _fixFeature({
   required Directory featureDir,
   required String projectName,
   required Logger logger,
+  required String stateManagement,
 }) {
   final f = p.basename(featureDir.path);
   final pascal = pascalCase(f);
@@ -157,10 +170,13 @@ int _fixFeature({
       projectName: projectName,
       featureSnake: f,
       featurePascal: pascal,
+      featureCamel: camel,
+      stateManagement: stateManagement,
     ),
     'presentation/manager/${f}_state.dart': _stateTemplate(
       projectName: projectName,
       featurePascal: pascal,
+      stateManagement: stateManagement,
     ),
     'di/${f}_module.dart': _moduleTemplate(
       projectName: projectName,
@@ -183,9 +199,19 @@ int _fixFeature({
   return fixed;
 }
 
-void _checkFeature(Directory featureDir, List<_Issue> issues) {
+void _checkFeature(
+  Directory featureDir,
+  List<_Issue> issues,
+  String stateManagement,
+) {
   final f = p.basename(featureDir.path);
   final pascal = pascalCase(f);
+  final managerDeclaration = switch (stateManagement) {
+    'riverpod' => 'class ${pascal}Notifier',
+    'bloc' => 'class ${pascal}Bloc',
+    'cubit' => 'class ${pascal}Cubit',
+    _ => 'class ${pascal}Provider',
+  };
 
   // Required files (bare feature shape).
   final required = <String, String>{
@@ -193,7 +219,7 @@ void _checkFeature(Directory featureDir, List<_Issue> issues) {
     'data/repository/${f}_repository_impl.dart':
         'class ${pascal}RepositoryImpl',
     'domain/repository/${f}_repository.dart': 'class ${pascal}Repository',
-    'presentation/manager/${f}_provider.dart': 'class ${pascal}Provider',
+    'presentation/manager/${f}_provider.dart': managerDeclaration,
     'presentation/manager/${f}_state.dart': 'class ${pascal}State',
     'di/${f}_module.dart': 'class ${pascal}Module',
   };
@@ -210,13 +236,15 @@ void _checkFeature(Directory featureDir, List<_Issue> issues) {
     }
   });
 
-  // Provider should be @injectable so get_it can construct it.
-  final provider = File(
+  // Riverpod owns construction through its provider declaration. The other
+  // managers use get_it and must remain injectable.
+  final manager = File(
     p.join(featureDir.path, 'presentation', 'manager', '${f}_provider.dart'),
   );
-  if (provider.existsSync() &&
-      !provider.readAsStringSync().contains('@injectable')) {
-    issues.add(_Issue.warn('[$f] provider is not annotated @injectable'));
+  if (stateManagement != 'riverpod' &&
+      manager.existsSync() &&
+      !manager.readAsStringSync().contains('@injectable')) {
+    issues.add(_Issue.warn('[$f] manager is not annotated @injectable'));
   }
 }
 
@@ -366,8 +394,60 @@ String _providerTemplate({
   required String projectName,
   required String featureSnake,
   required String featurePascal,
-}) =>
-    '''
+  required String featureCamel,
+  required String stateManagement,
+}) {
+  if (stateManagement == 'riverpod') {
+    return '''
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+
+final ${featureCamel}Provider = NotifierProvider<${featurePascal}Notifier, ${featurePascal}State>(
+  ${featurePascal}Notifier.new,
+);
+
+class ${featurePascal}Notifier extends Notifier<${featurePascal}State> {
+  @override
+  ${featurePascal}State build() => const ${featurePascal}State();
+}
+''';
+  }
+  if (stateManagement == 'bloc') {
+    return '''
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:injectable/injectable.dart';
+
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+
+sealed class ${featurePascal}Event {
+  const ${featurePascal}Event();
+}
+
+// forgekit:event-classes
+
+@injectable
+class ${featurePascal}Bloc extends Bloc<${featurePascal}Event, ${featurePascal}State> {
+  ${featurePascal}Bloc() : super(const ${featurePascal}State()) {
+    // forgekit:event-registrations
+  }
+}
+''';
+  }
+  if (stateManagement == 'cubit') {
+    return '''
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:injectable/injectable.dart';
+
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+
+@injectable
+class ${featurePascal}Cubit extends Cubit<${featurePascal}State> {
+  ${featurePascal}Cubit() : super(const ${featurePascal}State());
+}
+''';
+  }
+  return '''
 import 'package:injectable/injectable.dart';
 
 import 'package:$projectName/core/presentation/manager/custom_provider.dart';
@@ -379,12 +459,42 @@ class ${featurePascal}Provider extends CustomProvider {
   ${featurePascal}State get state => _state;
 }
 ''';
+}
 
 String _stateTemplate({
   required String projectName,
   required String featurePascal,
-}) =>
-    '''
+  required String stateManagement,
+}) {
+  if (stateManagement != 'provider') {
+    return '''
+enum ${featurePascal}Status { idle, loading, success, error }
+
+class ${featurePascal}State {
+  const ${featurePascal}State({
+    this.status = ${featurePascal}Status.idle,
+    this.errorMessage,
+  });
+
+  final ${featurePascal}Status status;
+  final String? errorMessage;
+
+  bool get isLoading => status == ${featurePascal}Status.loading;
+  bool get hasError => status == ${featurePascal}Status.error;
+
+  ${featurePascal}State copyWith({
+    ${featurePascal}Status? status,
+    String? errorMessage,
+  }) {
+    return ${featurePascal}State(
+      status: status ?? this.status,
+      errorMessage: errorMessage ?? this.errorMessage,
+    );
+  }
+}
+''';
+  }
+  return '''
 import 'package:$projectName/core/presentation/manager/custom_state.dart';
 
 class ${featurePascal}State extends CustomState {
@@ -404,6 +514,7 @@ class ${featurePascal}State extends CustomState {
   }
 }
 ''';
+}
 
 String _moduleTemplate({
   required String projectName,

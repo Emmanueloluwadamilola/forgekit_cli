@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'utils.dart';
 
@@ -30,6 +31,7 @@ Future<int> addFunction({
   final fnPascal = _pascal(functionName);
   final fnCamel = _camel(functionName);
   final projectName = detectProjectName(root: root);
+  final stateManagement = loadForgeKitConfig(root: root).stateManagement;
 
   final featureDir =
       Directory(p.join(root.path, 'lib', 'features', featureSnake));
@@ -228,6 +230,7 @@ Future<int> addFunction({
       fnCamel,
       response,
       payload,
+      stateManagement,
     );
   } on _GenException catch (e) {
     progress.fail(e.message);
@@ -245,7 +248,7 @@ Future<int> addFunction({
   );
   logger.info('');
   logger.info('Next steps:');
-  logger.info('  dart run build_runner build --delete-conflicting-outputs');
+  logger.info('  dart run build_runner build');
   return 0;
 }
 
@@ -550,6 +553,7 @@ void _wireProvider(
   String fnCamel,
   _ResponseSpec response,
   _PayloadSpec? payload,
+  String stateManagement,
 ) {
   final file = File(
     p.join(
@@ -564,7 +568,10 @@ void _wireProvider(
   final imports = <String>[
     'package:$projectName/core/di/core_module_container.dart',
     'package:$projectName/core/domain/api/api_result.dart',
-    'package:$projectName/core/presentation/manager/custom_state.dart',
+    if (stateManagement == 'provider')
+      'package:$projectName/core/presentation/manager/custom_state.dart'
+    else
+      'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart',
     'package:$projectName/features/$featureSnake/domain/usecase/${fnSnake}_usecase.dart',
     if (response.classes.isNotEmpty)
       'package:$projectName/features/$featureSnake/domain/entity/model/${fnSnake}_response.dart',
@@ -579,32 +586,146 @@ void _wireProvider(
   final fieldType =
       response.modelType == 'dynamic' ? 'dynamic' : '${response.modelType}?';
 
+  if (stateManagement == 'bloc') {
+    _wireBlocOperation(
+      file: file,
+      imports: imports,
+      featurePascal: featurePascal,
+      fnPascal: fnPascal,
+      fnCamel: fnCamel,
+      param: param,
+      callArg: callArg,
+      fieldType: fieldType,
+      payload: payload,
+    );
+    return;
+  }
+
+  final statusType =
+      stateManagement == 'provider' ? 'ViewStatus' : '${featurePascal}Status';
+  final setLoading = switch (stateManagement) {
+    'riverpod' =>
+      '    state = state.copyWith(status: $statusType.loading, errorMessage: null);',
+    'cubit' =>
+      '    emit(state.copyWith(status: $statusType.loading, errorMessage: null));',
+    _ =>
+      '    _state = _state.copyWith(status: $statusType.loading, errorMessage: null);',
+  };
+  final setSuccess = switch (stateManagement) {
+    'riverpod' =>
+      '        state = state.copyWith(status: $statusType.success);',
+    'cubit' => '        emit(state.copyWith(status: $statusType.success));',
+    _ => '        _state = _state.copyWith(status: $statusType.success);',
+  };
+  final setFailure = switch (stateManagement) {
+    'riverpod' =>
+      '        state = state.copyWith(status: $statusType.error, errorMessage: message);',
+    'cubit' =>
+      '        emit(state.copyWith(status: $statusType.error, errorMessage: message));',
+    _ =>
+      '        _state = _state.copyWith(status: $statusType.error, errorMessage: message);',
+  };
+
   final snippet = StringBuffer()
     ..writeln()
     ..writeln('  /// Result of the most recent [$fnCamel] call.')
     ..writeln('  $fieldType ${fnCamel}Result;')
     ..writeln()
     ..writeln('  Future<void> $fnCamel($param) async {')
-    ..writeln(
-      '    _state = _state.copyWith(status: ViewStatus.loading, errorMessage: null);',
-    )
-    ..writeln('    notifyListeners();')
+    ..writeln(setLoading);
+  if (stateManagement == 'provider') {
+    snippet.writeln('    notifyListeners();');
+  }
+  snippet
     ..writeln()
     ..writeln('    final result = await getIt<${fnPascal}Usecase>()($callArg);')
     ..writeln()
     ..writeln('    switch (result) {')
     ..writeln('      case Success(:final data):')
     ..writeln('        ${fnCamel}Result = data;')
-    ..writeln('        _state = _state.copyWith(status: ViewStatus.success);')
+    ..writeln(setSuccess)
     ..writeln('      case Failure(:final message):')
-    ..writeln(
-      '        _state = _state.copyWith(status: ViewStatus.error, errorMessage: message);',
-    )
-    ..writeln('    }')
-    ..writeln('    notifyListeners();')
-    ..writeln('  }');
+    ..writeln(setFailure)
+    ..writeln('    }');
+  if (stateManagement == 'provider') {
+    snippet.writeln('    notifyListeners();');
+  }
+  snippet.writeln('  }');
 
   var content = _addImports(file.readAsStringSync(), imports);
+  content = _insertBeforeLastBrace(content, snippet.toString());
+  file.writeAsStringSync(content);
+}
+
+void _wireBlocOperation({
+  required File file,
+  required List<String> imports,
+  required String featurePascal,
+  required String fnPascal,
+  required String fnCamel,
+  required String param,
+  required String callArg,
+  required String fieldType,
+  required _PayloadSpec? payload,
+}) {
+  final eventName = '${fnPascal}Requested';
+  final eventClass = payload == null
+      ? '''class $eventName extends ${featurePascal}Event {
+  const $eventName();
+}'''
+      : '''class $eventName extends ${featurePascal}Event {
+  const $eventName(this.payload);
+
+  final ${payload.rootName} payload;
+}''';
+  final handlerCallArg = payload == null ? callArg : 'event.payload';
+  final publicCallArg =
+      payload == null ? 'const $eventName()' : '$eventName(payload)';
+  final snippet = StringBuffer()
+    ..writeln()
+    ..writeln('  /// Result of the most recent [$fnCamel] call.')
+    ..writeln('  $fieldType ${fnCamel}Result;')
+    ..writeln()
+    ..writeln('  void $fnCamel($param) => add($publicCallArg);')
+    ..writeln()
+    ..writeln('  Future<void> _on$fnPascal(')
+    ..writeln('    $eventName event,')
+    ..writeln('    Emitter<${featurePascal}State> emit,')
+    ..writeln('  ) async {')
+    ..writeln(
+      '    emit(state.copyWith(status: ${featurePascal}Status.loading, errorMessage: null));',
+    )
+    ..writeln(
+      '    final result = await getIt<${fnPascal}Usecase>()($handlerCallArg);',
+    )
+    ..writeln('    switch (result) {')
+    ..writeln('      case Success(:final data):')
+    ..writeln('        ${fnCamel}Result = data;')
+    ..writeln(
+      '        emit(state.copyWith(status: ${featurePascal}Status.success));',
+    )
+    ..writeln('      case Failure(:final message):')
+    ..writeln(
+      '        emit(state.copyWith(status: ${featurePascal}Status.error, errorMessage: message));',
+    )
+    ..writeln('    }')
+    ..writeln('  }');
+
+  var content = file.readAsStringSync();
+  const eventMarker = '// forgekit:event-classes';
+  const registrationMarker = '// forgekit:event-registrations';
+  if (!content.contains(eventMarker) || !content.contains(registrationMarker)) {
+    throw const _GenException(
+      'The Bloc manager is missing ForgeKit operation markers.',
+    );
+  }
+  content = content
+      .replaceFirst(eventMarker, '$eventClass\n\n$eventMarker')
+      .replaceFirst(
+        registrationMarker,
+        'on<$eventName>(_on$fnPascal);\n    $registrationMarker',
+      );
+  content = _addImports(content, imports);
   content = _insertBeforeLastBrace(content, snippet.toString());
   file.writeAsStringSync(content);
 }

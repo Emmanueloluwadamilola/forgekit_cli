@@ -13,7 +13,7 @@ final GetIt getIt = GetIt.instance;
 /// The implementation ([_getIt.init]) is generated into
 /// `core_module_container.config.dart` by `injectable_generator`. Run:
 ///
-///   dart run build_runner build --delete-conflicting-outputs
+///   dart run build_runner build
 ///
 /// to (re)generate it.
 @InjectableInit(

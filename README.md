@@ -24,19 +24,26 @@ package tools.
 ## Features
 
 - Scaffold a complete Flutter app from the `forge_app` Mason brick.
+- Choose Provider, Riverpod, Bloc, or Cubit when creating an app.
+- Keep project-wide generator choices in a validated `forgekit.yaml` file.
+- Adopt existing Flutter projects with automatic architecture detection.
+- Preview changes, track generated files, and roll back the latest generation.
 - Add Clean Architecture features with data, domain, presentation, routing, and
   dependency-injection wiring.
 - Generate API functions from pasted JSON, including DTOs, models, payloads,
   use cases, repositories, providers, and service methods.
 - Generate standalone models, screens, shared widgets, services, and use cases.
 - Add Google Fonts, assets, launch icons, splash screens, and build flavors.
+- Target Flutter apps and packages inside Dart pub workspaces and monorepos.
 - Run `doctor` checks against the ForgeKit Architecture Standard.
 - Use the same CLI from the terminal or the companion VS Code extension.
 
 ## Requirements
 
 - Dart SDK `>=3.0.0 <4.0.0`
-- Flutter SDK for app generation and generated-project workflows
+- Flutter SDK for app generation and generated-project workflows. Newly
+  generated apps require the Dart SDK bundled with current Flutter releases
+  (`>=3.8.0`).
 - `~/.pub-cache/bin` on your `PATH` when using globally activated Dart tools
 
 ## Installation
@@ -116,7 +123,14 @@ forgekit help <command>
 | Command | Purpose |
 | --- | --- |
 | `forgekit setup` | Install Mason when needed and register ForgeKit's bundled bricks. |
+| `forgekit workspace list` | List Dart and Flutter packages in the current pub workspace. |
 | `forgekit create app <name>` | Create a new ForgeKit Flutter project. |
+| `forgekit init` | Detect and adopt an existing Flutter project by creating `forgekit.yaml`. |
+| `forgekit config show` | Print the resolved project configuration. |
+| `forgekit config set <key> <value>` | Update one validated configuration value. |
+| `forgekit config validate` | Validate `forgekit.yaml`. |
+| `forgekit diff` | Check whether files from the latest generation have changed. |
+| `forgekit rollback` | Safely undo the latest ForgeKit generation transaction. |
 | `forgekit add feature <name>` | Add a Clean Architecture feature module. |
 | `forgekit add function [feature] <name>` | Generate an API operation from JSON and wire it into a feature. |
 | `forgekit add model [feature] <name>` | Generate a domain model and DTO from JSON. |
@@ -143,6 +157,36 @@ forgekit help <command>
 | `forgekit doctor` | Check the project against the architecture standard. Use `--fix` for safe repairs. |
 | `forgekit update` | Update ForgeKit from the GitHub repository and rerun setup. |
 
+### Use ForgeKit in a Workspace
+
+ForgeKit supports Dart pub workspaces, including nested workspaces and glob
+entries supported by the installed Dart SDK. Inspect the packages from anywhere
+inside the repository:
+
+```sh
+forgekit workspace list
+forgekit workspace list --json
+```
+
+Target a Flutter package by its pubspec name or its path relative to the
+workspace root:
+
+```sh
+forgekit add feature orders --package mobile_app
+forgekit add screen orders order_detail --package apps/mobile_app
+forgekit doctor --package mobile_app --ci
+```
+
+The global `--package` option can appear before or after the command. ForgeKit
+uses Dart's workspace resolver to validate the target, runs the command from
+that package's directory, and does not change your shell's current directory.
+The selected package must be a declared Flutter workspace package. When you are
+already inside a package, commands continue to work without `--package`.
+
+Pub workspaces require Dart 3.6 or later; workspace globs require Dart 3.11 or
+later. See the [Dart pub workspace documentation](https://dart.dev/tools/pub/workspaces)
+for the required `workspace:` and `resolution: workspace` configuration.
+
 ### Create an App
 
 ```sh
@@ -150,11 +194,111 @@ forgekit create app my_app
 forgekit create app my_app --org com.example
 forgekit create app my_app --org com.example --font Poppins
 forgekit create app my_app --router go_router
+forgekit create app my_app --state-management provider
+forgekit create app my_app --state-management riverpod
+forgekit create app my_app --state-management bloc
+forgekit create app my_app --state-management cubit
 ```
 
 `create app` runs `flutter create`, then applies the `forge_app` brick. The
 default router mode is `named`. Use `--router go_router` to generate a
-`MaterialApp.router` setup with `go_router`.
+`MaterialApp.router` setup with `go_router`. State management defaults to
+Provider uses ForgeKit's existing `CustomProvider` and `CustomState` classes on
+top of the Provider package. The selected Provider, Riverpod, Bloc, or Cubit
+stack is applied to app theme state, generated features, screens, API
+operations, starter tests, and architecture checks.
+
+When `--state-management` is omitted, ForgeKit shows all four options in the
+terminal and waits for a selection before creating the project.
+
+Every new app receives a `forgekit.yaml`, so later feature generation uses the
+same router and state-management choices automatically.
+
+### Adopt an Existing App
+
+Run `init` from an existing Flutter project:
+
+```sh
+forgekit init
+forgekit config validate
+forgekit doctor
+```
+
+ForgeKit inspects `pubspec.yaml` and `lib/` to detect Clean Architecture,
+Riverpod, Bloc or Cubit, GoRouter, dependency injection, model generation, and
+the API client. Detection does not rewrite application code. Review the newly
+created `forgekit.yaml`, then use normal generators.
+
+Override ambiguous detection explicitly:
+
+```sh
+forgekit init --profile clean --state-management bloc
+forgekit init --force
+```
+
+### Project Configuration
+
+`forgekit.yaml` is the project-level source of truth for generator defaults
+and detected architecture metadata:
+
+```yaml
+version: 1
+
+architecture: clean
+state_management: provider
+router: go_router
+dependency_injection: injectable
+models: json_serializable
+api_client: retrofit
+
+testing:
+  coverage: 80
+
+generation:
+  format: true
+  build_runner: true
+```
+
+Inspect or update it without editing YAML manually:
+
+```sh
+forgekit config show
+forgekit config set state-management cubit
+forgekit config set generation.build-runner false
+forgekit config validate
+```
+
+Command-line options take precedence where an override is supported. For
+example, `forgekit add feature orders --router named` overrides the configured
+router for that feature, while `--no-build-runner` overrides the generation
+default for that command. State management remains project-wide; change it in
+`forgekit.yaml` before generating features.
+
+### Safe Generation
+
+Preview a project-changing command without keeping its writes:
+
+```sh
+forgekit add feature orders --dry-run
+forgekit doctor --fix --dry-run
+forgekit config set router go_router --dry-run
+```
+
+ForgeKit snapshots project files before supported mutating commands. A dry run
+executes the same generator, prints created, modified, and deleted paths, then
+restores the original files. Failed commands are restored automatically.
+
+Successful generations record hashes and rollback backups under `.forgekit/`.
+ForgeKit adds this local backup directory to the target project's `.gitignore`:
+
+```sh
+forgekit diff
+forgekit rollback
+```
+
+`diff` reports files edited since the latest generation. `rollback` refuses to
+overwrite those later edits; after reviewing them, `forgekit rollback --force`
+can explicitly restore the recorded state.
 
 ### Add a Feature
 
@@ -396,6 +540,7 @@ Format and analyze package source:
 ```sh
 dart format bin lib
 dart analyze
+dart test
 ```
 
 Do not run `dart format .` on the whole repository. Mason templates contain
@@ -413,7 +558,7 @@ Run generated Flutter projects with normal Flutter tooling:
 
 ```sh
 flutter pub get
-dart run build_runner build --delete-conflicting-outputs
+dart run build_runner build
 flutter analyze
 flutter test
 ```
@@ -434,7 +579,7 @@ flutter test
 | `forgekit: command not found` | Add `~/.pub-cache/bin` to `PATH`, then reactivate with `dart pub global activate --source git https://github.com/Emmanueloluwadamilola/forgekit_cli.git`. |
 | `Mason not found` | Run `forgekit setup`. |
 | Mason cannot find a brick | Run `forgekit setup` to register the bundled bricks. |
-| Generated code is missing `.g.dart` files | Run `dart run build_runner build --delete-conflicting-outputs`. |
+| Generated code is missing `.g.dart` files | Run `dart run build_runner build`. |
 | Feature inference fails | Pass the feature name explicitly, for example `forgekit add screen orders detail`. |
 | Font lookup fails | Check the exact font name on Google Fonts and quote multi-word names. |
 

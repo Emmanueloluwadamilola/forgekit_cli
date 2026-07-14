@@ -1,51 +1,77 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+{{#useProvider}}import 'package:provider/provider.dart';
 
 import 'package:{{projectName}}/core/di/core_module_container.dart';
+{{/useProvider}}{{#useRiverpod}}import 'package:flutter_riverpod/flutter_riverpod.dart';
+{{/useRiverpod}}{{#useBloc}}import 'package:flutter_bloc/flutter_bloc.dart';
+
+import 'package:{{projectName}}/core/di/core_module_container.dart';
+{{/useBloc}}{{#useCubit}}import 'package:flutter_bloc/flutter_bloc.dart';
+
+import 'package:{{projectName}}/core/di/core_module_container.dart';
+{{/useCubit}}
 import 'package:{{projectName}}/features/{{name.snakeCase()}}/presentation/manager/{{name.snakeCase()}}_provider.dart';
+import 'package:{{projectName}}/features/{{name.snakeCase()}}/presentation/manager/{{name.snakeCase()}}_state.dart';
 
 /// Screen for the {{name.pascalCase()}} feature.
-{{#useRouter}}
-// ROUTE (named routes): register this screen in core/presentation/app/app.dart
-// `routes` map:
-//   {{name.pascalCase()}}Screen.id: (_) => const {{name.pascalCase()}}Screen(),
-{{/useRouter}}
-{{^useRouter}}
-// ROUTE (go_router): {{name.camelCase()}}Routes is defined in
-// features/{{name.snakeCase()}}/presentation/{{name.snakeCase()}}_routes.dart.
-// Spread it into your central AppRouter:
-//   GoRouter(routes: [ ...{{name.camelCase()}}Routes ]);
-{{/useRouter}}
-class {{name.pascalCase()}}Screen extends StatelessWidget {
-  const {{name.pascalCase()}}Screen({super.key});
+{{#useProvider}}class {{name.pascalCase()}}Screen extends StatelessWidget {
+{{/useProvider}}{{#useRiverpod}}class {{name.pascalCase()}}Screen extends ConsumerWidget {
+{{/useRiverpod}}{{#useBloc}}class {{name.pascalCase()}}Screen extends StatelessWidget {
+{{/useBloc}}{{#useCubit}}class {{name.pascalCase()}}Screen extends StatelessWidget {
+{{/useCubit}}  const {{name.pascalCase()}}Screen({super.key});
 
   static const id = '/{{name.snakeCase()}}';
 
   @override
-  Widget build(BuildContext context) {
-    return ChangeNotifierProvider<{{name.pascalCase()}}Provider>(
+{{#useRiverpod}}  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch({{name.camelCase()}}Provider);
+    return _{{name.pascalCase()}}View(state: state);
+  }
+{{/useRiverpod}}{{^useRiverpod}}  Widget build(BuildContext context) {
+{{#useProvider}}    return ChangeNotifierProvider<{{name.pascalCase()}}Provider>(
       create: (_) => getIt<{{name.pascalCase()}}Provider>(),
-      child: Scaffold(
-        appBar: AppBar(title: const Text('{{name.titleCase()}}')),
-        body: Consumer<{{name.pascalCase()}}Provider>(
-          builder: (context, provider, _) {
-            final state = provider.state;
-
-            if (state.isLoading) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (state.hasError) {
-              return Center(
-                child: Text(state.errorMessage ?? 'Something went wrong'),
-              );
-            }
-
-            // TODO: build the {{name.pascalCase()}} UI.
-            return const SizedBox.shrink();
-          },
-        ),
+      child: Consumer<{{name.pascalCase()}}Provider>(
+        builder: (context, provider, _) =>
+            _{{name.pascalCase()}}View(state: provider.state),
       ),
     );
+{{/useProvider}}{{#useBloc}}    return BlocProvider<{{name.pascalCase()}}Bloc>(
+      create: (_) => getIt<{{name.pascalCase()}}Bloc>(),
+      child: BlocBuilder<{{name.pascalCase()}}Bloc, {{name.pascalCase()}}State>(
+        builder: (context, state) => _{{name.pascalCase()}}View(state: state),
+      ),
+    );
+{{/useBloc}}{{#useCubit}}    return BlocProvider<{{name.pascalCase()}}Cubit>(
+      create: (_) => getIt<{{name.pascalCase()}}Cubit>(),
+      child: BlocBuilder<{{name.pascalCase()}}Cubit, {{name.pascalCase()}}State>(
+        builder: (context, state) => _{{name.pascalCase()}}View(state: state),
+      ),
+    );
+{{/useCubit}}  }
+{{/useRiverpod}}}
+
+class _{{name.pascalCase()}}View extends StatelessWidget {
+  const _{{name.pascalCase()}}View({required this.state});
+
+  final {{name.pascalCase()}}State state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('{{name.titleCase()}}')),
+      body: _body(),
+    );
+  }
+
+  Widget _body() {
+    if (state.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (state.hasError) {
+      return Center(
+        child: Text(state.errorMessage ?? 'Something went wrong'),
+      );
+    }
+    return const SizedBox.shrink();
   }
 }

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
 
+import '../config_service.dart';
 import '../font_service.dart';
 import '../utils.dart';
 
@@ -43,6 +44,11 @@ class _CreateAppCommand extends Command<int> {
         help: 'Routing style for the generated app.',
         allowed: ['named', 'go_router'],
         defaultsTo: 'named',
+      )
+      ..addOption(
+        'state-management',
+        help: 'State management used by the generated project.',
+        allowed: supportedStateManagement,
       );
   }
 
@@ -57,7 +63,9 @@ class _CreateAppCommand extends Command<int> {
 
   @override
   String get invocation =>
-      'forgekit create app <name> [--org <org>] [--font <FontName>] [--router named|go_router]';
+      'forgekit create app <name> [--org <org>] [--font <FontName>] '
+      '[--router named|go_router] '
+      '[--state-management provider|riverpod|bloc|cubit]';
 
   @override
   Future<int> run() async {
@@ -80,7 +88,15 @@ class _CreateAppCommand extends Command<int> {
     final org = args['org'] as String;
     final font = args['font'] as String?;
     final router = args['router'] as String;
+    final stateManagement = args['state-management'] as String? ??
+        _logger.chooseOne(
+          'Select state management:',
+          choices: supportedStateManagement,
+          defaultValue: 'provider',
+        ) ??
+        'provider';
     final useRouter = router == 'named';
+    final stateFlags = stateManagementMasonFlags(stateManagement);
 
     final platforms = _logger.chooseAny(
       'Select target platforms to support:',
@@ -129,6 +145,7 @@ class _CreateAppCommand extends Command<int> {
         org,
         '--useRouter',
         '$useRouter',
+        ...stateFlags,
         '--on-conflict',
         'overwrite',
       ],
@@ -141,6 +158,20 @@ class _CreateAppCommand extends Command<int> {
     }
 
     progress.complete('Created app "$name" in ./$name');
+
+    try {
+      await saveForgeKitConfig(
+        root: Directory(name),
+        config: ForgeKitConfig(
+          stateManagement: stateManagement,
+          router: router,
+        ),
+      );
+    } on ConfigException catch (error) {
+      _logger.err('App created, but forgekit.yaml could not be written: '
+          '${error.message}');
+      return 1;
+    }
 
     // Optionally download and wire up a Google Font into the new project.
     if (font != null && font.trim().isNotEmpty) {
@@ -158,7 +189,7 @@ class _CreateAppCommand extends Command<int> {
       ..info('Next steps:')
       ..info('  cd $name')
       ..info('  flutter pub get')
-      ..info('  dart run build_runner build --delete-conflicting-outputs');
+      ..info('  dart run build_runner build');
     return 0;
   }
 }

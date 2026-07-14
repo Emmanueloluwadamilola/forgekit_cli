@@ -27,7 +27,6 @@ void run(HookContext context) {
   logger.info('');
   logger.info('  2. Run code generation to wire up the @lazySingleton:');
   logger.info('');
-  logger
-      .info('       dart run build_runner build --delete-conflicting-outputs');
+  logger.info('       dart run build_runner build');
   logger.info('');
 }

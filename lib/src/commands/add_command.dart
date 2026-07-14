@@ -5,6 +5,7 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
 import '../asset_service.dart';
+import '../config_service.dart';
 import '../env_service.dart';
 import '../flavor_service.dart';
 import '../font_service.dart';
@@ -57,12 +58,10 @@ class _AddFeatureCommand extends Command<int> {
         'router',
         help: 'Routing style for the generated feature.',
         allowed: ['named', 'go_router'],
-        defaultsTo: 'named',
       )
       ..addFlag(
         'build-runner',
-        help: 'Run build_runner after generation.',
-        defaultsTo: true,
+        help: 'Override the forgekit.yaml build_runner setting.',
       )
       ..addFlag(
         'with-tests',
@@ -81,7 +80,8 @@ class _AddFeatureCommand extends Command<int> {
 
   @override
   String get invocation =>
-      'forgekit add feature <name> [--router named|go_router] [--no-build-runner]';
+      'forgekit add feature <name> [--router named|go_router] '
+      '[--no-build-runner]';
 
   @override
   Future<int> run() async {
@@ -94,11 +94,18 @@ class _AddFeatureCommand extends Command<int> {
     }
 
     final name = rest.first;
-    final router = args['router'] as String;
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+    final config = loadForgeKitConfig(root: root);
+    final router = args['router'] as String? ?? config.router;
+    final stateManagement = config.stateManagement;
     // The brick's `useRouter` var means "this project uses named routes" — true
     // for the default `named` style, false when go_router is chosen.
     final useRouter = router == 'named';
-    final projectName = detectProjectName();
+    final projectName = detectProjectName(root: root);
 
     final progress = _logger.progress('Adding feature "$name"');
 
@@ -112,6 +119,7 @@ class _AddFeatureCommand extends Command<int> {
         '$useRouter',
         '--projectName',
         projectName,
+        ...stateManagementMasonFlags(stateManagement),
         // Supply every brick var so Mason never stops for an interactive
         // prompt (a hidden prompt behind our spinner looks like a hang).
         // ForgeKit runs build_runner itself below, so the brick must not.
@@ -139,18 +147,21 @@ class _AddFeatureCommand extends Command<int> {
         feature: name,
         logger: _logger,
         root: root,
+        stateManagement: stateManagement,
       );
       if (testCode != 0) return testCode;
     }
 
     // Optionally run build_runner to wire up DI / serialization codegen.
-    final runBuildRunner = args['build-runner'] as bool;
+    final runBuildRunner = args.wasParsed('build-runner')
+        ? args['build-runner'] as bool
+        : config.runBuildRunner;
     if (runBuildRunner) {
       return _runBuildRunner(_logger);
     }
     _logger.info(
       'Skipped build_runner (--no-build-runner). Remember to run:\n'
-      '  dart run build_runner build --delete-conflicting-outputs',
+      '  dart run build_runner build',
     );
     return 0;
   }
@@ -346,8 +357,7 @@ class _AddFunctionCommand extends Command<int> {
       )
       ..addFlag(
         'build-runner',
-        help: 'Run build_runner after generation.',
-        defaultsTo: true,
+        help: 'Override the forgekit.yaml build_runner setting.',
       )
       ..addFlag(
         'with-tests',
@@ -380,6 +390,7 @@ class _AddFunctionCommand extends Command<int> {
       _logger.info('Run this from inside a Flutter project.');
       return 1;
     }
+    final config = loadForgeKitConfig(root: root);
 
     // Two forms:
     //   forgekit add function <feature> <name>   (from anywhere in the project)
@@ -429,12 +440,15 @@ class _AddFunctionCommand extends Command<int> {
       if (testCode != 0) return testCode;
     }
 
-    if (args['build-runner'] as bool) {
+    final runBuildRunner = args.wasParsed('build-runner')
+        ? args['build-runner'] as bool
+        : config.runBuildRunner;
+    if (runBuildRunner) {
       return _runBuildRunner(_logger, workingDirectory: root.path);
     }
     _logger.info(
       'Skipped build_runner (--no-build-runner). Remember to run:\n'
-      '  dart run build_runner build --delete-conflicting-outputs',
+      '  dart run build_runner build',
     );
     return 0;
   }
@@ -454,8 +468,7 @@ class _AddModelCommand extends Command<int> {
       )
       ..addFlag(
         'build-runner',
-        help: 'Run build_runner after generation.',
-        defaultsTo: true,
+        help: 'Override the forgekit.yaml build_runner setting.',
       )
       ..addFlag(
         'with-tests',
@@ -487,6 +500,7 @@ class _AddModelCommand extends Command<int> {
       _logger.err('No pubspec.yaml found in this or any parent directory.');
       return 1;
     }
+    final config = loadForgeKitConfig(root: root);
 
     // Three forms, mirroring `add screen`:
     //   add model <feature> <name>   → that feature
@@ -532,12 +546,15 @@ class _AddModelCommand extends Command<int> {
       if (testCode != 0) return testCode;
     }
 
-    if (args['build-runner'] as bool) {
+    final runBuildRunner = args.wasParsed('build-runner')
+        ? args['build-runner'] as bool
+        : config.runBuildRunner;
+    if (runBuildRunner) {
       return _runBuildRunner(_logger, workingDirectory: root.path);
     }
     _logger.info(
       'Skipped build_runner (--no-build-runner). Remember to run:\n'
-      '  dart run build_runner build --delete-conflicting-outputs',
+      '  dart run build_runner build',
     );
     return 0;
   }
@@ -1067,7 +1084,7 @@ class _AddFunctionTestCommand extends Command<int> {
   }
 }
 
-/// Runs `dart run build_runner build --delete-conflicting-outputs`.
+/// Runs `dart run build_runner build`.
 ///
 /// Returns `0` on success / `1` on failure (or if `dart` is unavailable).
 Future<int> _runBuildRunner(Logger logger, {String? workingDirectory}) async {
@@ -1075,7 +1092,7 @@ Future<int> _runBuildRunner(Logger logger, {String? workingDirectory}) async {
   try {
     final process = await Process.start(
       'dart',
-      ['run', 'build_runner', 'build', '--delete-conflicting-outputs'],
+      ['run', 'build_runner', 'build'],
       mode: ProcessStartMode.inheritStdio,
       runInShell: true,
       workingDirectory: workingDirectory,

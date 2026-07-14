@@ -1,3 +1,4 @@
+{{#useProvider}}
 import 'package:flutter/material.dart';
 
 /// Base [ChangeNotifier] for all feature providers.
@@ -18,3 +19,4 @@ class CustomProvider extends ChangeNotifier {
     if (!_disposed) super.notifyListeners();
   }
 }
+{{/useProvider}}

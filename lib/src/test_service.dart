@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'utils.dart';
 
@@ -11,7 +12,10 @@ Future<int> addFeatureTests({
   required Logger logger,
   required Directory root,
   bool force = false,
+  String? stateManagement,
 }) async {
+  final selectedStateManagement =
+      stateManagement ?? loadForgeKitConfig(root: root).stateManagement;
   final projectName = detectProjectName(root: root);
   final featureSnake = snakeCase(feature);
   final featurePascal = pascalCase(featureSnake);
@@ -31,11 +35,13 @@ Future<int> addFeatureTests({
       projectName: projectName,
       featureSnake: featureSnake,
       featurePascal: featurePascal,
+      stateManagement: selectedStateManagement,
     ),
     '${featureSnake}_provider_test.dart': _featureProviderTest(
       projectName: projectName,
       featureSnake: featureSnake,
       featurePascal: featurePascal,
+      stateManagement: selectedStateManagement,
     ),
   };
 
@@ -160,18 +166,23 @@ String _featureStateTest({
   required String projectName,
   required String featureSnake,
   required String featurePascal,
+  required String stateManagement,
 }) {
+  final statusImport = stateManagement == 'provider'
+      ? "import 'package:$projectName/core/presentation/manager/custom_state.dart';\n"
+      : '';
+  final statusType =
+      stateManagement == 'provider' ? 'ViewStatus' : '${featurePascal}Status';
   return '''
 import 'package:flutter_test/flutter_test.dart';
-import 'package:$projectName/core/presentation/manager/custom_state.dart';
-import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+${statusImport}import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
 
 void main() {
   group('${featurePascal}State', () {
     test('starts idle', () {
       const state = ${featurePascal}State();
 
-      expect(state.status, ViewStatus.idle);
+      expect(state.status, $statusType.idle);
       expect(state.errorMessage, isNull);
       expect(state.isLoading, isFalse);
       expect(state.hasError, isFalse);
@@ -179,11 +190,11 @@ void main() {
 
     test('copyWith updates status and error message', () {
       final state = const ${featurePascal}State().copyWith(
-        status: ViewStatus.error,
+        status: $statusType.error,
         errorMessage: 'Something went wrong',
       );
 
-      expect(state.status, ViewStatus.error);
+      expect(state.status, $statusType.error);
       expect(state.errorMessage, 'Something went wrong');
       expect(state.hasError, isTrue);
     });
@@ -196,7 +207,42 @@ String _featureProviderTest({
   required String projectName,
   required String featureSnake,
   required String featurePascal,
+  required String stateManagement,
 }) {
+  if (stateManagement == 'riverpod') {
+    return '''
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_provider.dart';
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+
+void main() {
+  test('${featurePascal}Notifier starts idle', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+
+    expect(container.read(${_camel(featureSnake)}Provider).status,
+        ${featurePascal}Status.idle);
+  });
+}
+''';
+  }
+  if (stateManagement == 'bloc') {
+    return _blocManagerTest(
+      projectName: projectName,
+      featureSnake: featureSnake,
+      featurePascal: featurePascal,
+      managerType: '${featurePascal}Bloc',
+    );
+  }
+  if (stateManagement == 'cubit') {
+    return _blocManagerTest(
+      projectName: projectName,
+      featureSnake: featureSnake,
+      featurePascal: featurePascal,
+      managerType: '${featurePascal}Cubit',
+    );
+  }
   return '''
 import 'package:flutter_test/flutter_test.dart';
 import 'package:$projectName/core/presentation/manager/custom_state.dart';
@@ -214,6 +260,33 @@ void main() {
   });
 }
 ''';
+}
+
+String _blocManagerTest({
+  required String projectName,
+  required String featureSnake,
+  required String featurePascal,
+  required String managerType,
+}) {
+  return '''
+import 'package:flutter_test/flutter_test.dart';
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_provider.dart';
+import 'package:$projectName/features/$featureSnake/presentation/manager/${featureSnake}_state.dart';
+
+void main() {
+  test('$managerType starts idle', () async {
+    final manager = $managerType();
+    addTearDown(manager.close);
+
+    expect(manager.state.status, ${featurePascal}Status.idle);
+  });
+}
+''';
+}
+
+String _camel(String input) {
+  final pascal = pascalCase(input);
+  return pascal.isEmpty ? '' : pascal[0].toLowerCase() + pascal.substring(1);
 }
 
 String _modelTest({

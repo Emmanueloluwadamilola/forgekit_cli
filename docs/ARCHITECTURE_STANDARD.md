@@ -16,7 +16,7 @@ and `the-lex-app-mobile`.
 | Concern            | Choice                                                              | Notes |
 |--------------------|--------------------------------------------------------------------|-------|
 | Architecture       | Clean Architecture, feature-first                                  | data / domain / presentation inside each feature |
-| State management   | `provider` + `ChangeNotifier`                                      | via `CustomProvider` base + paired `*State` object |
+| State management   | Provider, Riverpod, Bloc, or Cubit                                  | selected project-wide in `forgekit.yaml`; Provider uses the ForgeKit `CustomProvider` base and every option uses an immutable paired `*State` object |
 | Dependency injection | `get_it` + `injectable`                                          | one `@module` per feature, generated container |
 | Networking         | `dio` + `retrofit` + `awesome_dio_interceptor`                     | 401/token-refresh interceptor, `ApiResult<T>` wrapper |
 | Serialization      | `json_serializable` + `json_annotation`                            | no `freezed`; explicit DTO → domain conversion |
@@ -28,12 +28,14 @@ and `the-lex-app-mobile`.
 
 ```yaml
 provider: ^6.1.2
+flutter_riverpod: ^2.6.1 # when the Riverpod profile is selected
+flutter_bloc: ^9.1.0     # when the Bloc or Cubit profile is selected
 get_it: ^8.0.3
 injectable: ^2.5.0
 dio: ^5.8.0
 retrofit: ^4.9.2
 awesome_dio_interceptor: ^1.3.0
-json_annotation: ^4.9.0
+json_annotation: ^4.12.0
 gap: ^3.0.1
 flutter_secure_storage: ^9.2.2
 dartz: ^0.10.1            # optional, for Either-style error handling
@@ -42,8 +44,12 @@ dartz: ^0.10.1            # optional, for Either-style error handling
 build_runner: ^2.4.13
 injectable_generator: ^2.6.1
 retrofit_generator: ^10.2.6
-json_serializable: ^6.8.0
+json_serializable: ^6.14.0
 ```
+
+The detailed examples below use the Provider profile.
+Riverpod, Bloc, and Cubit generators preserve the same feature-first layer
+boundaries while replacing the presentation manager and widget bindings.
 
 ---
 
@@ -295,7 +301,7 @@ central `AppRouter`. Choose one per project and stay consistent.
   that provides the retrofit `ApiService` and binds `RepositoryImpl` to `Repository`.
 - Use cases and providers are annotated `@injectable` / `@lazySingleton` so they are wired
   automatically.
-- After any generation that touches DI, run: `dart run build_runner build --delete-conflicting-outputs`.
+- After any generation that touches DI, run: `dart run build_runner build`.
   The CLI/brick hooks do this for you (unless `--no-build-runner`).
 
 ---
@@ -306,19 +312,18 @@ central `AppRouter`. Choose one per project and stay consistent.
 - Typography: `core/presentation/theme/text_theme.dart` (`MyTextTheme` with light/dark).
 - Theme assembly: `core/presentation/theme/app_theme.dart` (`AppTheme` mixin exposing
   `lightTheme()` / `darkTheme()` building `ThemeData` + Material 3 `ColorScheme`).
-- Theme switching: `ThemeProvider extends ChangeNotifier`.
+- Theme switching follows the selected state profile; Provider uses
+  `ThemeProvider extends ChangeNotifier`.
 - Shared widgets live in `core/presentation/widgets/` and are added via the `widget` brick.
 
 ---
 
-## 10. The two documented convention variants
+## 10. Documented project choices
 
-The standard ships with the current stack locked. Two opt-in modernizations are supported
-as flags so teams can choose without forking the generators:
+Two project-wide choices are supported without forking the generators:
 
 1. **Routing** — `--router=named` (default) or `--router=go_router`.
-2. **Services location** — always `lib/services/` (the inconsistency from the reviewed apps
-   is resolved here in favor of the top-level location).
+2. **State management** — Provider, Riverpod, Bloc, or Cubit.
 
-Everything else (Provider, get_it/injectable, dio/retrofit, json_serializable) is fixed to
-match all seven reviewed apps exactly, for maximum familiarity and lowest migration cost.
+Dependency injection, networking, serialization, and the top-level `lib/services/`
+location remain consistent across all profiles.

@@ -5,3 +5,5 @@ coverage/
 pubspec_overrides.yaml
 *.log
 .DS_Store
+.mason/
+mason-lock.json

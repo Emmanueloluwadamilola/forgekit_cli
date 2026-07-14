@@ -24,3 +24,23 @@ vars:
       Routing style. true = named routes. false = go_router.
     default: true
     prompt: Use named routes? (No = generate a go_router app router instead)
+  useProvider:
+    type: boolean
+    description: Generate Provider-based ChangeNotifier state management.
+    default: true
+    prompt: Use Provider state management?
+  useRiverpod:
+    type: boolean
+    description: Generate Riverpod state management.
+    default: false
+    prompt: Use Riverpod state management?
+  useBloc:
+    type: boolean
+    description: Generate Bloc state management.
+    default: false
+    prompt: Use Bloc state management?
+  useCubit:
+    type: boolean
+    description: Generate Cubit state management.
+    default: false
+    prompt: Use Cubit state management?
