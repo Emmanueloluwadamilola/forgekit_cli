@@ -1,4 +1,4 @@
-name: {{name.snakeCase()}}
+name: "{{name.snakeCase()}}"
 description: A new Forge Flutter application.
 publish_to: "none"
 version: 1.0.0+1
@@ -11,23 +11,23 @@ dependencies:
     sdk: flutter
 
   # State management
-{{#useProvider}}
+  # {{#useProvider}}
   provider: ^6.1.2
-{{/useProvider}}
-{{#useRiverpod}}
+  # {{/useProvider}}
+  # {{#useRiverpod}}
   flutter_riverpod: ^2.6.1
-{{/useRiverpod}}
-{{#useBloc}}
+  # {{/useRiverpod}}
+  # Bloc and Cubit use the same flutter_bloc package.
+  # {{^useProvider}}
+  # {{^useRiverpod}}
   flutter_bloc: ^9.1.0
-{{/useBloc}}
-{{#useCubit}}
-  flutter_bloc: ^9.1.0
-{{/useCubit}}
-{{^useRouter}}
+  # {{/useRiverpod}}
+  # {{/useProvider}}
+  # {{^useRouter}}
 
   # Routing
   go_router: ^14.0.0
-{{/useRouter}}
+  # {{/useRouter}}
 
   # Dependency injection
   get_it: ^8.0.3
