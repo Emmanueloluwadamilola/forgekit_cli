@@ -11,8 +11,8 @@ Future<void> main() async {
   // Wire up the get_it/injectable dependency graph.
   await configureDependencies();
 
-  // Register cross-cutting services here, e.g.:
-  // await getIt<NotificationService>().init();
+  // Storage and other initialized services are inserted above this marker.
+  // forgekit:service-initializers
 
 {{#useRiverpod}}  runApp(const ProviderScope(child: App()));
 {{/useRiverpod}}{{^useRiverpod}}  runApp(const App());

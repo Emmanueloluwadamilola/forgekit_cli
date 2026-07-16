@@ -13,6 +13,7 @@ import '../function_service.dart';
 import '../i18n_service.dart';
 import '../model_service.dart';
 import '../screen_service.dart';
+import '../storage_service.dart';
 import '../test_service.dart';
 import '../utils.dart';
 import '../widget_registry_service.dart';
@@ -297,7 +298,18 @@ class _AddWidgetCommand extends Command<int> {
 
 /// `forgekit add service <name>`
 class _AddServiceCommand extends Command<int> {
-  _AddServiceCommand({Logger? logger}) : _logger = logger ?? Logger();
+  _AddServiceCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser
+      ..addOption(
+        'driver',
+        allowed: storageServiceDrivers,
+        help: 'Generate a complete storage service using this driver.',
+      )
+      ..addFlag(
+        'build-runner',
+        help: 'Override the forgekit.yaml build_runner setting for a driver.',
+      );
+  }
 
   final Logger _logger;
 
@@ -305,10 +317,13 @@ class _AddServiceCommand extends Command<int> {
   String get name => 'service';
 
   @override
-  String get description => 'Generate a cross-cutting singleton service.';
+  String get description =>
+      'Generate a generic singleton or a fully wired storage service.';
 
   @override
-  String get invocation => 'forgekit add service <name>';
+  String get invocation => 'forgekit add service <name> '
+      '[--driver shared_preferences|flutter_secure_storage] '
+      '[--no-build-runner]';
 
   @override
   Future<int> run() async {
@@ -319,8 +334,34 @@ class _AddServiceCommand extends Command<int> {
       return 1;
     }
 
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+
     final name = rest.first;
-    final projectName = detectProjectName();
+    final driver = argResults!['driver'] as String?;
+    if (driver != null) {
+      final config = loadForgeKitConfig(root: root);
+      final runBuildRunner = argResults!.wasParsed('build-runner')
+          ? argResults!['build-runner'] as bool
+          : config.runBuildRunner;
+      return addStorageService(
+        name: name,
+        driver: driver,
+        root: root,
+        logger: _logger,
+        runBuildRunner: runBuildRunner,
+      );
+    }
+
+    if (argResults!.wasParsed('build-runner')) {
+      _logger.err('--build-runner is only available with --driver.');
+      return 1;
+    }
+
+    final projectName = detectProjectName(root: root);
     final progress = _logger.progress('Adding service "$name"');
 
     final exitCode = await runMason(
@@ -335,6 +376,7 @@ class _AddServiceCommand extends Command<int> {
         '.',
       ],
       logger: _logger,
+      workingDirectory: root.path,
     );
 
     if (exitCode != 0) {

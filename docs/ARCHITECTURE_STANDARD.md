@@ -54,6 +54,7 @@ awesome_dio_interceptor: ^1.3.0
 json_annotation: ^4.12.0
 gap: ^3.0.1
 flutter_secure_storage: ^9.2.2
+shared_preferences: ^2.5.3 # when a SharedPreferences storage service is added
 dartz: ^0.10.1            # optional, for Either-style error handling
 
 # dev
@@ -291,7 +292,21 @@ A service is a cross-cutting singleton in `lib/services/`, registered in DI as a
 Each generated service:
 1. Creates `lib/services/<name>_service.dart` with an `init()` method.
 2. Registers it in DI (`@lazySingleton` annotation + re-run build_runner).
-3. Adds an `await getIt<XService>().init();` line to `main.dart` bootstrap (via hook).
+3. Is initialized during app bootstrap when the generator supports automatic
+   initialization.
+
+Storage services are first-class driver-backed generators:
+
+```sh
+forgekit add service local_storage --driver shared_preferences
+forgekit add service secure_storage --driver flutter_secure_storage
+```
+
+These commands add the package dependency, generate complete typed storage
+functions, register the service in Injectable/GetIt or Flutter Modular, and
+insert an idempotent `init()` call before `runApp`. Generic services generated
+without `--driver` remain application-specific and print their manual bootstrap
+step.
 
 ---
 

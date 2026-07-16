@@ -9,6 +9,7 @@ import 'commands/create_command.dart';
 import 'commands/diff_command.dart';
 import 'commands/doctor_command.dart';
 import 'commands/init_command.dart';
+import 'commands/import_command.dart';
 import 'commands/registry_command.dart';
 import 'commands/remove_command.dart';
 import 'commands/rename_command.dart';
@@ -67,6 +68,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
     addCommand(SetupCommand(logger: _logger));
     addCommand(SyncCommand(logger: _logger));
     addCommand(DoctorCommand(logger: _logger));
+    addCommand(ImportCommand(logger: _logger));
     addCommand(InitCommand(logger: _logger));
     addCommand(RollbackCommand(logger: _logger));
     addCommand(UpdateCommand(logger: _logger));
@@ -96,6 +98,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
           'diff',
           'doctor',
           'init',
+          'import',
           'remove',
           'rename',
           'rollback',
@@ -105,7 +108,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
         if (!supportedCommands.contains(commandName)) {
           throw UsageException(
             '--package is only supported by project commands: '
-            'add, config, diff, doctor, init, remove, rename, rollback, '
+            'add, config, diff, doctor, import, init, remove, rename, rollback, '
             'set, and sync.',
             usage,
           );
@@ -126,13 +129,14 @@ class ForgeCommandRunner extends CommandRunner<int> {
         'config',
         'doctor',
         'init',
+        'import',
         'remove',
         'rename',
         'set',
       };
       if (dryRun && !transactionalCommands.contains(commandName)) {
         throw UsageException(
-          '--dry-run is supported by add, config, doctor, init, remove, '
+          '--dry-run is supported by add, config, doctor, import, init, remove, '
           'rename, and set commands.',
           usage,
         );

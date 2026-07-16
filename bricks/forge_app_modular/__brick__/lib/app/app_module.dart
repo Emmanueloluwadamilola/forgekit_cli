@@ -7,6 +7,7 @@ final appModule = createModule(
   register: (c) {
     c
       ..addLazySingleton<Dio>(Dio.new)
+      // forgekit:services
       ..route('/', child: (_, __) => const HomePage())
       // forgekit:modules
       ;

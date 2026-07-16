@@ -6,7 +6,12 @@ import 'package:flutter_modular/flutter_modular.dart';
 import 'app/app.dart';
 import 'app/app_module.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Storage and other initialized services are inserted above this marker.
+  // forgekit:service-initializers
+
 {{#useRiverpod}}  runApp(
     ModularApp(
       module: appModule,

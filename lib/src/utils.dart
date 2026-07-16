@@ -42,12 +42,17 @@ String? inferFeatureName({required Directory root, Directory? start}) {
 ///
 /// If the `mason` executable cannot be found / started (e.g. it is not
 /// installed), prints an actionable hint and returns `1`.
-Future<int> runMason(List<String> args, {Logger? logger}) async {
+Future<int> runMason(
+  List<String> args, {
+  Logger? logger,
+  String? workingDirectory,
+}) async {
   final log = logger ?? Logger();
   try {
     final result = await Process.start(
       'mason',
       args,
+      workingDirectory: workingDirectory,
       // Inherit the parent's stdio so Mason prompts/output stream live.
       mode: ProcessStartMode.inheritStdio,
       runInShell: true,

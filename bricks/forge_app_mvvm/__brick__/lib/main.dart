@@ -8,6 +8,10 @@ import 'ui/core/app/app.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await configureDependencies();
+
+  // Storage and other initialized services are inserted above this marker.
+  // forgekit:service-initializers
+
 {{#useRiverpod}}  runApp(const ProviderScope(child: App()));
 {{/useRiverpod}}{{^useRiverpod}}  runApp(const App());
 {{/useRiverpod}}}

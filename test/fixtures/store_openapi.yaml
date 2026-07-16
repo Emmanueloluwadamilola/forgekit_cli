@@ -1,0 +1,83 @@
+openapi: 3.0.3
+info:
+  title: Store API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      tags: [Catalog]
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+    post:
+      operationId: createProduct
+      tags: [Catalog]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProduct'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+  /products/{productId}:
+    delete:
+      operationId: deleteProduct
+      tags: [Catalog]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: X-Request-ID
+          in: header
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+components:
+  schemas:
+    CreateProduct:
+      type: object
+      required: [name, price]
+      properties:
+        name:
+          type: string
+        price:
+          type: number
+          format: double
+        description:
+          type: string
+          nullable: true
+    Product:
+      allOf:
+        - $ref: '#/components/schemas/CreateProduct'
+        - type: object
+          required: [id, created_at]
+          properties:
+            id:
+              type: integer
+            created_at:
+              type: string
+              format: date-time
