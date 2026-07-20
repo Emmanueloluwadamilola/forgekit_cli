@@ -2,11 +2,13 @@ import 'dart:io';
 
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
+import 'package:pub_semver/pub_semver.dart';
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
 import 'config_service.dart';
 import 'json_to_dart.dart';
+import 'service_wiring_service.dart';
 import 'utils.dart';
 
 const storageServiceDrivers = [
@@ -83,21 +85,15 @@ Future<int> addStorageService({
     );
 
     if (config.architecture == 'modular') {
-      _wireModularRegistration(
+      wireModularInitializedService(
         root: root,
         projectName: projectName,
         serviceSnake: serviceSnake,
         className: className,
         instanceName: instanceName,
       );
-      _wireModularBootstrap(
-        root: root,
-        projectName: projectName,
-        serviceSnake: serviceSnake,
-        instanceName: instanceName,
-      );
     } else {
-      _wireGetItBootstrap(
+      wireGetItInitializedService(
         root: root,
         projectName: projectName,
         serviceSnake: serviceSnake,
@@ -121,7 +117,7 @@ Future<int> addStorageService({
   progress.complete('Added $className with $selectedDriver.');
 
   if (runPackageCommands) {
-    final pubGetCode = await _runInherited(
+    final pubGetCode = await runInheritedProjectCommand(
       'flutter',
       ['pub', 'get'],
       root: root,
@@ -131,7 +127,7 @@ Future<int> addStorageService({
     if (pubGetCode != 0) return pubGetCode;
 
     if (config.architecture != 'modular' && runBuildRunner) {
-      final buildCode = await _runInherited(
+      final buildCode = await runInheritedProjectCommand(
         'dart',
         ['run', 'build_runner', 'build'],
         root: root,
@@ -173,8 +169,8 @@ void _addDependency(Directory root, String driver) {
 
   final editor = YamlEditor(pubspec.readAsStringSync());
   final dependency = switch (driver) {
-    'shared_preferences' => ('shared_preferences', '^2.5.3'),
-    'flutter_secure_storage' => ('flutter_secure_storage', '^9.2.2'),
+    'shared_preferences' => ('shared_preferences', '^2.5.5'),
+    'flutter_secure_storage' => ('flutter_secure_storage', '^10.3.1'),
     _ => throw ArgumentError.value(driver, 'driver'),
   };
 
@@ -183,6 +179,23 @@ void _addDependency(Directory root, String driver) {
     editor.update(['dependencies'], {dependency.$1: dependency.$2});
   } else if (!dependencies.containsKey(dependency.$1)) {
     editor.update(['dependencies', dependency.$1], dependency.$2);
+  } else {
+    final existing = dependencies[dependency.$1];
+    if (existing is! String) {
+      throw ArgumentError(
+        'Existing ${dependency.$1} dependency uses a non-hosted source. '
+        'Review and update it manually before generating this service.',
+      );
+    }
+    final target = Version.parse(dependency.$2.substring(1));
+    final constraint = VersionConstraint.parse(existing);
+    if (!constraint.allows(target)) {
+      throw ArgumentError(
+        'Existing ${dependency.$1} constraint "$existing" does not allow the '
+        'tested ${dependency.$2} baseline. Update and migrate the dependency '
+        'before generating this service.',
+      );
+    }
   }
   pubspec.writeAsStringSync(editor.toString());
 }
@@ -192,171 +205,6 @@ YamlNode? _tryParse(YamlEditor editor, List<Object> path) {
     return editor.parseAt(path);
   } on ArgumentError {
     return null;
-  }
-}
-
-void _wireGetItBootstrap({
-  required Directory root,
-  required String projectName,
-  required String serviceSnake,
-  required String className,
-}) {
-  final mainFile = File(p.join(root.path, 'lib', 'main.dart'));
-  if (!mainFile.existsSync()) {
-    throw const FileSystemException('Could not find lib/main.dart.');
-  }
-
-  var source = mainFile.readAsStringSync();
-  source = _addImport(
-    source,
-    'package:$projectName/services/${serviceSnake}_service.dart',
-  );
-  final initialization = 'await getIt<$className>().init();';
-  source = _insertServiceInitialization(
-    source,
-    initialization: initialization,
-    anchor: 'await configureDependencies();',
-  );
-  mainFile.writeAsStringSync(source);
-}
-
-void _wireModularRegistration({
-  required Directory root,
-  required String projectName,
-  required String serviceSnake,
-  required String className,
-  required String instanceName,
-}) {
-  final moduleFile = File(p.join(root.path, 'lib', 'app', 'app_module.dart'));
-  if (!moduleFile.existsSync()) {
-    throw const FileSystemException(
-      'Could not find lib/app/app_module.dart for Modular registration.',
-    );
-  }
-
-  var source = moduleFile.readAsStringSync();
-  source = _addImport(
-    source,
-    'package:$projectName/services/${serviceSnake}_service.dart',
-  );
-  final registration = '..addInstance<$className>($instanceName)';
-  if (!source.contains(registration)) {
-    const marker = '// forgekit:services';
-    if (source.contains(marker)) {
-      source = source.replaceFirst(marker, '$registration\n      $marker');
-    } else {
-      final routeIndex = source.indexOf('..route(');
-      if (routeIndex == -1) {
-        throw const FormatException(
-          'Could not locate the Modular registration cascade.',
-        );
-      }
-      source = source.replaceRange(
-        routeIndex,
-        routeIndex,
-        '$registration\n      ',
-      );
-    }
-  }
-  moduleFile.writeAsStringSync(source);
-}
-
-void _wireModularBootstrap({
-  required Directory root,
-  required String projectName,
-  required String serviceSnake,
-  required String instanceName,
-}) {
-  final mainFile = File(p.join(root.path, 'lib', 'main.dart'));
-  if (!mainFile.existsSync()) {
-    throw const FileSystemException('Could not find lib/main.dart.');
-  }
-
-  var source = mainFile.readAsStringSync();
-  source = _addImport(
-    source,
-    'package:$projectName/services/${serviceSnake}_service.dart',
-  );
-  source = source.replaceFirst(
-    RegExp(r'\bvoid\s+main\s*\(\s*\)\s*\{'),
-    'Future<void> main() async {',
-  );
-  if (!source.contains('Future<void> main() async {')) {
-    throw const FormatException('Could not make Modular main asynchronous.');
-  }
-  if (!source.contains('WidgetsFlutterBinding.ensureInitialized();')) {
-    source = source.replaceFirst(
-      'Future<void> main() async {',
-      'Future<void> main() async {\n'
-          '  WidgetsFlutterBinding.ensureInitialized();',
-    );
-  }
-  source = _insertServiceInitialization(
-    source,
-    initialization: 'await $instanceName.init();',
-    anchor: 'WidgetsFlutterBinding.ensureInitialized();',
-  );
-  mainFile.writeAsStringSync(source);
-}
-
-String _addImport(String source, String uri) {
-  final import = "import '$uri';";
-  if (source.contains(import)) return source;
-  final imports =
-      RegExp(r"^import '.+';\s*$", multiLine: true).allMatches(source).toList();
-  if (imports.isEmpty) {
-    throw const FormatException('Could not locate imports in the Dart file.');
-  }
-  final last = imports.last;
-  return source.replaceRange(last.end, last.end, '\n$import');
-}
-
-String _insertServiceInitialization(
-  String source, {
-  required String initialization,
-  required String anchor,
-}) {
-  if (source.contains(initialization)) return source;
-  const marker = '// forgekit:service-initializers';
-  if (source.contains(marker)) {
-    return source.replaceFirst(marker, '$initialization\n  $marker');
-  }
-  if (!source.contains(anchor)) {
-    throw FormatException('Could not find bootstrap anchor `$anchor`.');
-  }
-  return source.replaceFirst(
-    anchor,
-    '$anchor\n\n  $initialization\n  $marker',
-  );
-}
-
-Future<int> _runInherited(
-  String executable,
-  List<String> arguments, {
-  required Directory root,
-  required Logger logger,
-  required String label,
-}) async {
-  final progress = logger.progress('Running $label');
-  try {
-    final process = await Process.start(
-      executable,
-      arguments,
-      workingDirectory: root.path,
-      mode: ProcessStartMode.inheritStdio,
-      runInShell: true,
-    );
-    final code = await process.exitCode;
-    if (code == 0) {
-      progress.complete('$label finished.');
-    } else {
-      progress.fail('$label exited with code $code.');
-    }
-    return code;
-  } on ProcessException catch (error) {
-    progress.fail('Could not start $label.');
-    logger.err(error.message);
-    return 1;
   }
 }
 
@@ -370,97 +218,93 @@ ${modular ? '' : "import 'package:injectable/injectable.dart';\n"}import 'packag
 
 /// Stores non-sensitive application preferences on the device.
 ///
-/// Call [init] once during app startup before using the synchronous getters.
+/// Call [init] once during app startup so platform failures happen before UI.
 ${modular ? '' : '@lazySingleton\n'}class $className {
-  late SharedPreferences _preferences;
+  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
   bool _initialized = false;
 
   bool get isInitialized => _initialized;
 
   Future<void> init() async {
     if (_initialized) return;
-    _preferences = await SharedPreferences.getInstance();
+    await _preferences.getKeys();
     _initialized = true;
   }
 
-  Object? get(String key) {
+  Future<Object?> get(String key) async {
     _ensureInitialized();
-    return _preferences.get(key);
+    final values = await _preferences.getAll(allowList: {key});
+    return values[key];
   }
 
-  String? getString(String key) {
+  Future<String?> getString(String key) {
     _ensureInitialized();
     return _preferences.getString(key);
   }
 
-  bool? getBool(String key) {
+  Future<bool?> getBool(String key) {
     _ensureInitialized();
     return _preferences.getBool(key);
   }
 
-  int? getInt(String key) {
+  Future<int?> getInt(String key) {
     _ensureInitialized();
     return _preferences.getInt(key);
   }
 
-  double? getDouble(String key) {
+  Future<double?> getDouble(String key) {
     _ensureInitialized();
     return _preferences.getDouble(key);
   }
 
-  List<String>? getStringList(String key) {
+  Future<List<String>?> getStringList(String key) {
     _ensureInitialized();
     return _preferences.getStringList(key);
   }
 
-  Future<bool> setString(String key, String value) {
+  Future<void> setString(String key, String value) {
     _ensureInitialized();
     return _preferences.setString(key, value);
   }
 
-  Future<bool> setBool(String key, bool value) {
+  Future<void> setBool(String key, bool value) {
     _ensureInitialized();
     return _preferences.setBool(key, value);
   }
 
-  Future<bool> setInt(String key, int value) {
+  Future<void> setInt(String key, int value) {
     _ensureInitialized();
     return _preferences.setInt(key, value);
   }
 
-  Future<bool> setDouble(String key, double value) {
+  Future<void> setDouble(String key, double value) {
     _ensureInitialized();
     return _preferences.setDouble(key, value);
   }
 
-  Future<bool> setStringList(String key, List<String> value) {
+  Future<void> setStringList(String key, List<String> value) {
     _ensureInitialized();
     return _preferences.setStringList(key, value);
   }
 
-  bool containsKey(String key) {
+  Future<bool> containsKey(String key) {
     _ensureInitialized();
     return _preferences.containsKey(key);
   }
 
-  Set<String> getKeys() {
+  Future<Set<String>> getKeys() {
     _ensureInitialized();
     return _preferences.getKeys();
   }
 
-  Future<bool> remove(String key) {
+  Future<void> remove(String key) {
     _ensureInitialized();
     return _preferences.remove(key);
   }
 
-  Future<bool> clear() {
+  Future<void> clear({Set<String>? allowList}) {
     _ensureInitialized();
-    return _preferences.clear();
-  }
-
-  Future<void> reload() async {
-    _ensureInitialized();
-    await _preferences.reload();
+    return _preferences.clear(allowList: allowList);
   }
 
   void _ensureInitialized() {

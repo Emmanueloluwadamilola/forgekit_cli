@@ -52,6 +52,12 @@ class _ImportOpenApiCommand extends Command<int> {
         abbr: 'f',
         negatable: false,
         help: 'Replace features that already exist.',
+      )
+      ..addFlag(
+        'allow-remote-references',
+        negatable: false,
+        help: 'Allow a local OpenAPI file to fetch explicitly declared HTTPS '
+            r'$ref documents. Redirects remain same-origin.',
       );
   }
 
@@ -62,7 +68,7 @@ class _ImportOpenApiCommand extends Command<int> {
 
   @override
   String get description =>
-      'Generate complete API features from an OpenAPI 3.x document.';
+      'Generate typed API features from an OpenAPI 3.0/3.1 document.';
 
   @override
   String get invocation =>
@@ -103,6 +109,7 @@ class _ImportOpenApiCommand extends Command<int> {
       baseUrlOverride: argResults!['base-url'] as String?,
       generateTests: argResults!['tests'] as bool,
       force: argResults!['force'] as bool,
+      allowRemoteReferences: argResults!['allow-remote-references'] as bool,
     );
     if (code != 0) return code;
 
@@ -128,7 +135,6 @@ Future<int> _runBuildRunner(Directory root, Logger logger) async {
       ['run', 'build_runner', 'build'],
       workingDirectory: root.path,
       mode: ProcessStartMode.inheritStdio,
-      runInShell: true,
     );
     final code = await process.exitCode;
     if (code != 0) {

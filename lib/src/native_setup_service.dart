@@ -5,14 +5,21 @@ import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
+typedef NativeProcessExecutor = Future<int> Function(
+  String executable,
+  List<String> arguments,
+  Directory workingDirectory,
+);
+
 /// Sets the app launcher icon using `flutter_launcher_icons`.
 ///
 /// Copies [sourcePath] to `assets/icon/`, adds the package + config to
-/// `pubspec.yaml`, then runs the generator (best effort). Returns `0`/`1`.
+/// `pubspec.yaml`, then runs the generator and propagates its exit code.
 Future<int> setIcon({
   required String sourcePath,
   required Logger logger,
   required Directory root,
+  NativeProcessExecutor? executor,
 }) async {
   final dest = _copyInto(sourcePath, root, 'icon', logger);
   if (dest == null) return 1;
@@ -38,6 +45,7 @@ Future<int> setIcon({
     logger: logger,
     generator: ['run', 'flutter_launcher_icons'],
     manualHint: 'dart run flutter_launcher_icons',
+    executor: executor,
   );
 }
 
@@ -47,6 +55,7 @@ Future<int> setSplash({
   required Logger logger,
   required Directory root,
   String color = '#ffffff',
+  NativeProcessExecutor? executor,
 }) async {
   final dest = _copyInto(sourcePath, root, 'splash', logger);
   if (dest == null) return 1;
@@ -72,6 +81,7 @@ Future<int> setSplash({
     logger: logger,
     generator: ['run', 'flutter_native_splash:create'],
     manualHint: 'dart run flutter_native_splash:create',
+    executor: executor,
   );
 }
 
@@ -127,26 +137,58 @@ void _ensureDevDependency(YamlEditor editor, String name, String version) {
   }
 }
 
-/// Runs `flutter pub get` then the [generator]. Failures are non-fatal: we print
-/// the manual command so setup still counts as done.
+/// Runs `flutter pub get` then the [generator], preserving non-zero exit codes
+/// so the surrounding ForgeKit transaction can restore partial changes.
 Future<int> _pubGetThen({
   required Directory root,
   required Logger logger,
   required List<String> generator,
   required String manualHint,
+  NativeProcessExecutor? executor,
 }) async {
-  final ok =
-      await _run('flutter', ['pub', 'get'], root, logger, 'flutter pub get');
+  final ok = await _execute(
+    'flutter',
+    ['pub', 'get'],
+    root,
+    logger,
+    'flutter pub get',
+    executor,
+  );
   if (ok != 0) {
-    logger.warn('Config written, but "flutter pub get" did not run. '
-        'Run it, then: $manualHint');
-    return 0;
+    logger.err(
+      'Native configuration failed because "flutter pub get" did not '
+      'complete. ForgeKit will restore the project transaction.',
+    );
+    return ok;
   }
-  final gen = await _run('dart', generator, root, logger, manualHint);
+  final gen = await _execute(
+    'dart',
+    generator,
+    root,
+    logger,
+    manualHint,
+    executor,
+  );
   if (gen != 0) {
-    logger.warn('Config written. Finish by running: $manualHint');
+    logger.err(
+      'Native generator failed. ForgeKit will restore the project '
+      'transaction; fix the reported error and rerun the ForgeKit command.',
+    );
+    return gen;
   }
   return 0;
+}
+
+Future<int> _execute(
+  String executable,
+  List<String> arguments,
+  Directory root,
+  Logger logger,
+  String label,
+  NativeProcessExecutor? executor,
+) {
+  if (executor != null) return executor(executable, arguments, root);
+  return _run(executable, arguments, root, logger, label);
 }
 
 Future<int> _run(
@@ -162,7 +204,7 @@ Future<int> _run(
       exe,
       args,
       workingDirectory: root.path,
-      runInShell: true,
+      runInShell: Platform.isWindows && exe == 'flutter',
       mode: ProcessStartMode.inheritStdio,
     );
     final code = await proc.exitCode;

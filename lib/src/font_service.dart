@@ -1,10 +1,16 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
+
+import 'config_service.dart';
+
+const _maximumFontBytes = 5 * 1024 * 1024;
+const _maximumFontCssBytes = 256 * 1024;
 
 /// Downloads a Google Font and wires it into a Flutter ForgeKit CLI project.
 ///
@@ -24,8 +30,11 @@ Future<int> addFont(
   String projectDir = '.',
 }) async {
   final family = normalizeFamily(rawName);
-  if (family.isEmpty) {
-    logger.err('A font name is required, e.g. "forgekit add font Poppins".');
+  if (!_validFontFamily(family)) {
+    logger.err(
+      'Use a Google Font family containing only letters, numbers, spaces, '
+      'periods, plus signs, ampersands, or hyphens.',
+    );
     return 1;
   }
 
@@ -40,6 +49,9 @@ Future<int> addFont(
     return 1;
   } on http.ClientException catch (e) {
     progress.fail('Download failed: ${e.message}');
+    return 1;
+  } on _FontException catch (e) {
+    progress.fail(e.message);
     return 1;
   }
 
@@ -98,7 +110,7 @@ Future<List<_FontFile>> _downloadFamily(
       final ttfUrl = await _resolveTtfUrl(client, family, weight);
       if (ttfUrl == null) continue; // weight not offered by this family
 
-      final bytes = await client.readBytes(Uri.parse(ttfUrl));
+      final bytes = await _downloadTtf(client, Uri.parse(ttfUrl));
       destDir.createSync(recursive: true);
 
       final fileName = '${family.replaceAll(' ', '')}-$label.ttf';
@@ -126,9 +138,10 @@ Future<String?> _resolveTtfUrl(
   String family,
   int weight,
 ) async {
-  final familyParam = family.replaceAll(' ', '+');
-  final uri = Uri.parse(
-    'https://fonts.googleapis.com/css2?family=$familyParam:wght@$weight',
+  final uri = Uri.https(
+    'fonts.googleapis.com',
+    '/css2',
+    {'family': '$family:wght@$weight'},
   );
 
   final res = await client.get(
@@ -140,9 +153,90 @@ Future<String?> _resolveTtfUrl(
     },
   );
   if (res.statusCode != 200) return null;
+  if (res.bodyBytes.length > _maximumFontCssBytes) {
+    throw const _FontException(
+      'Google Fonts returned an unexpectedly large stylesheet.',
+    );
+  }
 
   final match = RegExp(r'url\((https:\/\/[^)]+\.ttf)\)').firstMatch(res.body);
-  return match?.group(1);
+  final value = match?.group(1);
+  if (value == null) return null;
+  final fontUri = Uri.tryParse(value);
+  if (fontUri == null ||
+      fontUri.scheme != 'https' ||
+      fontUri.userInfo.isNotEmpty ||
+      fontUri.host != 'fonts.gstatic.com') {
+    throw const _FontException(
+      'Google Fonts returned an untrusted font download URL.',
+    );
+  }
+  return value;
+}
+
+Future<Uint8List> _downloadTtf(http.Client client, Uri initialUri) async {
+  var current = initialUri;
+  for (var redirects = 0; redirects <= 3; redirects++) {
+    final request = http.Request('GET', current)..followRedirects = false;
+    final response = await client.send(request);
+    if (response.isRedirect) {
+      await response.stream.drain<void>();
+      final location = response.headers['location'];
+      if (location == null || redirects == 3) {
+        throw const _FontException(
+          'Google Font download redirected too many times.',
+        );
+      }
+      final next = current.resolve(location);
+      if (next.scheme != 'https' ||
+          next.userInfo.isNotEmpty ||
+          next.host != initialUri.host) {
+        throw const _FontException(
+          'Google Font download redirected to an untrusted origin.',
+        );
+      }
+      current = next;
+      continue;
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.drain<void>();
+      throw _FontException(
+        'Google Font download failed with HTTP ${response.statusCode}.',
+      );
+    }
+    final declaredLength = response.contentLength;
+    if (declaredLength != null && declaredLength > _maximumFontBytes) {
+      await response.stream.drain<void>();
+      throw const _FontException('Google Font file exceeds the 5 MiB limit.');
+    }
+    final builder = BytesBuilder(copy: false);
+    var length = 0;
+    await for (final chunk in response.stream) {
+      length += chunk.length;
+      if (length > _maximumFontBytes) {
+        throw const _FontException('Google Font file exceeds the 5 MiB limit.');
+      }
+      builder.add(chunk);
+    }
+    final bytes = builder.takeBytes();
+    if (!_isTrueTypeOrOpenType(bytes)) {
+      throw const _FontException(
+        'Google Font response was not a valid TrueType/OpenType font.',
+      );
+    }
+    return bytes;
+  }
+  throw const _FontException('Google Font download failed.');
+}
+
+bool _isTrueTypeOrOpenType(Uint8List bytes) {
+  if (bytes.length < 4) return false;
+  final trueType = bytes[0] == 0x00 &&
+      bytes[1] == 0x01 &&
+      bytes[2] == 0x00 &&
+      bytes[3] == 0x00;
+  final tag = String.fromCharCodes(bytes.take(4));
+  return trueType || tag == 'OTTO' || tag == 'true' || tag == 'typ1';
 }
 
 /// Adds (or replaces) the [family] entry under `flutter > fonts:` in
@@ -197,14 +291,12 @@ void _wireIntoTheme(
   required String projectDir,
 }) {
   final themeFile = File(
-    p.join(
+    p.joinAll([
       projectDir,
-      'lib',
-      'core',
-      'presentation',
-      'theme',
-      'app_theme.dart',
-    ),
+      ..._themePath(
+        loadForgeKitConfig(root: Directory(p.absolute(projectDir))),
+      ),
+    ]),
   );
 
   if (!themeFile.existsSync()) {
@@ -276,6 +368,24 @@ String normalizeFamily(String input) {
     return hasUpper ? word : word[0].toUpperCase() + word.substring(1);
   }).join(' ');
 }
+
+bool _validFontFamily(String family) =>
+    family.isNotEmpty &&
+    family.length <= 80 &&
+    RegExp(r'^[A-Za-z0-9 .+&-]+$').hasMatch(family) &&
+    !family.contains('..');
+
+List<String> _themePath(ForgeKitConfig config) => switch (config.architecture) {
+      'mvvm' => const ['lib', 'ui', 'core', 'themes', 'app_theme.dart'],
+      'modular' => const ['lib', 'core', 'theme', 'app_theme.dart'],
+      _ => const [
+          'lib',
+          'core',
+          'presentation',
+          'theme',
+          'app_theme.dart',
+        ],
+    };
 
 /// The static weights Forge attempts to fetch, mapped to their Flutter labels.
 const Map<int, String> _weightLabels = {

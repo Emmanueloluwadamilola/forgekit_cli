@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:args/args.dart';
 import 'package:args/command_runner.dart';
 import 'package:mason_logger/mason_logger.dart';
 
@@ -17,6 +18,7 @@ import 'commands/rollback_command.dart';
 import 'commands/set_command.dart';
 import 'commands/setup_command.dart';
 import 'commands/sync_command.dart';
+import 'commands/test_command.dart';
 import 'commands/update_command.dart';
 import 'commands/workspace_command.dart';
 import 'config_service.dart';
@@ -29,7 +31,23 @@ const packageVersion = '0.1.0';
 
 const _executableName = 'forgekit';
 const _description =
-    'Flutter ForgeKit CLI scaffolds production-ready Flutter architecture.';
+    'Flutter ForgeKit CLI scaffolds architecture-aware Flutter projects and code.';
+
+/// Returns the non-sensitive command path stored in generation metadata.
+///
+/// Positional arguments and option values are deliberately excluded. They can
+/// contain environment values, authenticated URLs, local paths, or pasted
+/// application data that does not belong in `.forgekit/backups`.
+String transactionCommandLabel(ArgResults results) {
+  final parts = <String>['forgekit'];
+  var command = results.command;
+  while (command != null) {
+    final name = command.name;
+    if (name != null && name.isNotEmpty) parts.add(name);
+    command = command.command;
+  }
+  return parts.join(' ');
+}
 
 /// The top-level [CommandRunner] for the `forgekit` CLI.
 ///
@@ -67,6 +85,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
     addCommand(SetCommand(logger: _logger));
     addCommand(SetupCommand(logger: _logger));
     addCommand(SyncCommand(logger: _logger));
+    addCommand(TestCommand(logger: _logger));
     addCommand(DoctorCommand(logger: _logger));
     addCommand(ImportCommand(logger: _logger));
     addCommand(InitCommand(logger: _logger));
@@ -104,12 +123,13 @@ class ForgeCommandRunner extends CommandRunner<int> {
           'rollback',
           'set',
           'sync',
+          'test',
         };
         if (!supportedCommands.contains(commandName)) {
           throw UsageException(
             '--package is only supported by project commands: '
             'add, config, diff, doctor, import, init, remove, rename, rollback, '
-            'set, and sync.',
+            'set, sync, and test.',
             usage,
           );
         }
@@ -155,7 +175,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
           }
           transaction = await GenerationTransaction.begin(
             root: root,
-            command: normalizedArgs.join(' '),
+            command: transactionCommandLabel(topLevelResults),
           );
         }
       }
@@ -198,6 +218,25 @@ class ForgeCommandRunner extends CommandRunner<int> {
       return 1;
     } on GenerationTransactionException catch (e) {
       _logger.err(e.message);
+      return 1;
+    } on FileSystemException catch (e) {
+      _logger.err(
+        'Filesystem operation failed${e.path == null ? '' : ' for ${e.path}'}: '
+        '${e.message}',
+      );
+      return 1;
+    } on ProcessException catch (e) {
+      _logger.err('Could not run ${e.executable}: ${e.message}');
+      return 1;
+    } catch (error, stackTrace) {
+      _logger.err(
+        'ForgeKit could not complete the command: $error\n'
+        'No intentional partial project changes were kept. Set '
+        'FORGEKIT_DEBUG=1 and retry to include diagnostic details.',
+      );
+      if (Platform.environment['FORGEKIT_DEBUG'] == '1') {
+        _logger.detail(stackTrace.toString());
+      }
       return 1;
     } finally {
       Directory.current = originalDirectory;

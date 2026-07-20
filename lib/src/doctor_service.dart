@@ -4,6 +4,7 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
 import 'config_service.dart';
+import 'env_service.dart';
 import 'json_to_dart.dart';
 import 'utils.dart';
 
@@ -47,6 +48,7 @@ Future<int> runDoctor({
     default:
       _checkCleanProject(root, issues, config.stateManagement);
   }
+  _checkBundledEnvironmentKeys(root, issues);
 
   // --- report ---
   final errors = issues.where((i) => i.isError).toList();
@@ -68,6 +70,20 @@ Future<int> runDoctor({
 
   if (ci) return issues.isEmpty ? 0 : 1;
   return errors.isEmpty ? 0 : 1;
+}
+
+void _checkBundledEnvironmentKeys(Directory root, List<_Issue> issues) {
+  final findings = findPotentiallySensitiveBundledEnvironmentKeys(root);
+  for (final entry in findings.entries) {
+    issues.add(
+      _Issue.warn(
+        '${entry.key} contains secret-like bundled key(s): '
+        '${entry.value.join(', ')}. Verify they are intentionally public and '
+        'provider-restricted, or move them to runtime/server-side secret '
+        'management.',
+      ),
+    );
+  }
 }
 
 Future<int> _applyFixes({
@@ -432,8 +448,8 @@ class Failure<T> extends ApiResult<T> {
 ''';
 
 String _useCaseTemplate() => '''
-abstract class UseCase<Type, Params> {
-  Future<Type> call(Params params);
+abstract class UseCase<Output, Params> {
+  Future<Output> call(Params params);
 }
 
 class NoParams {

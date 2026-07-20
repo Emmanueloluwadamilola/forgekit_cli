@@ -18,9 +18,9 @@ ForgeKit combines two kinds of generation:
 
 The result is more than a collection of templates. ForgeKit remembers the
 architecture selected for a project, generates new code in the corresponding
-shape, formats generated Dart, can run `build_runner`, records every changed
-file, detects edits made after generation, and can safely roll back the latest
-generation.
+shape, formats generated Dart, can run `build_runner`, and wraps supported
+project mutations in a recorded transaction that can be inspected or rolled
+back.
 
 ForgeKit does not require an account, API key, or hosted ForgeKit service. It
 runs with the filesystem and network permissions of the current terminal. A
@@ -30,6 +30,7 @@ Mason, or pushing a shared widget registry with Git.
 
 ## Table of contents
 
+- [Project status and support boundary](#project-status-and-support-boundary)
 - [What ForgeKit generates](#what-forgekit-generates)
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -44,6 +45,30 @@ Mason, or pushing a shared widget registry with Git.
 - [Development](#development)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
+- [License](#license)
+
+## Project status and support boundary
+
+Flutter ForgeKit CLI `0.1.0` is a **Git-distributed public beta**. It is useful
+for reviewed team workflows and its representative generated-app smoke suite
+exercises Clean, MVVM, and Modular projects across the supported routing,
+state-management, storage, and OpenAPI choices. It is not yet a hands-off
+production platform or a stable API. The package intentionally uses
+`publish_to: none` and is installed from Git or a local checkout.
+
+Current boundaries that matter in professional use:
+
+- OpenAPI import currently targets the Clean Architecture profile only.
+- Flavor generation is Dart-side scaffolding; native Android product flavors,
+  iOS schemes, signing, and store configuration remain application-owned.
+- The coverage gate measures eligible lines present in Flutter's LCOV report,
+  not every eligible source file in `lib/`. See [`forgekit test`](#forgekit-test).
+- The source is distributed under the [Apache License 2.0](LICENSE), including
+  an explicit patent grant and the usual warranty disclaimer.
+
+For team use, run ForgeKit on a clean Git branch, use explicit options in CI,
+review generated diffs, and keep normal application tests, analysis, security
+review, and platform release checks in place.
 
 ## What ForgeKit generates
 
@@ -57,9 +82,11 @@ ForgeKit can:
   routing in Modular projects.
 - Add architecture-aware feature skeletons.
 - Generate a complete API operation from pasted response and request JSON.
-- Import an OpenAPI 3.x JSON or YAML document and generate typed API features.
+- Import an OpenAPI 3.0 or 3.1 JSON/YAML document and generate typed API
+  features.
 - Generate standalone domain models and JSON-serializable DTOs.
-- Generate screens, shared widgets, singleton services, and use cases.
+- Generate screens, shared widgets, initialized singleton services, and use
+  cases, with architecture-aware route and dependency wiring.
 - Generate ready-to-use SharedPreferences and encrypted secure-storage
   services, including dependencies, typed functions, DI, and startup wiring.
 - Generate starter tests for features, models, and API functions.
@@ -75,12 +102,12 @@ ForgeKit can:
 - Preview changes with `--dry-run`, inspect drift with `diff`, and undo the
   latest generation with `rollback`.
 
-The architecture contract used by the generators is documented in
-[docs/ARCHITECTURE_STANDARD.md](docs/ARCHITECTURE_STANDARD.md).
+The architecture contract used by the generators is documented in the
+[Flutter ForgeKit CLI Architecture Standard](doc/ARCHITECTURE_STANDARD.md).
 
 ## Requirements
 
-- Dart SDK `>=3.0.0 <4.0.0` for the CLI itself.
+- Dart SDK `>=3.5.4 <4.0.0` for the CLI and its pinned Mason toolchain.
 - Flutter SDK for application creation and generated Flutter workflows.
 - A current Flutter-bundled Dart SDK (`>=3.8.0`) for newly generated apps.
 - `~/.pub-cache/bin` on `PATH` when using globally activated Dart tools.
@@ -101,13 +128,23 @@ git --version
 ### Install from GitHub
 
 ```sh
-dart pub global activate --source git https://github.com/Emmanueloluwadamilola/forgekit_cli.git
+FORGEKIT_REF=replace_with_a_reviewed_40_character_commit_sha
+dart pub global activate --source git \
+  https://github.com/Emmanueloluwadamilola/forgekit_cli.git \
+  --git-ref "$FORGEKIT_REF"
 forgekit setup
 ```
 
-`forgekit setup` checks for Mason, installs it when necessary, copies the
-bundled ForgeKit bricks to the ForgeKit home directory, and registers the
-bricks globally.
+Replace the placeholder with the complete commit SHA reviewed by your team.
+This uses Dart Pub's `--git-ref` support to install that exact source revision
+instead of following a mutable branch. Record the revision in build and
+onboarding documentation until signed/versioned releases exist. See
+[Dart's Git activation documentation](https://dart.dev/tools/pub/cmd/pub-global#activating-a-package-with-git).
+
+`forgekit setup` ensures the tested Mason CLI version (`0.1.3`) is active,
+replaces the local copies of ForgeKit's bundled bricks, and registers those
+brick names in Mason's global registry. Existing global registrations with the
+same `forge_*` names are replaced.
 
 Expected result, abbreviated:
 
@@ -172,12 +209,13 @@ forgekit create app shop_app \
   --org com.example \
   --architecture clean \
   --state-management provider \
-  --router named
+  --router go_router \
+  --platforms android,ios
 ```
 
-ForgeKit asks which Flutter platforms to enable, runs `flutter create`, applies
-the Clean app brick, removes Flutter's sample widget test, and writes
-`forgekit.yaml`.
+ForgeKit runs `flutter create` with Android and iOS enabled, applies the Clean
+app brick, removes Flutter's sample widget test, and writes `forgekit.yaml`.
+Omit `--platforms` when you want an interactive platform selector.
 
 Expected final output, abbreviated:
 
@@ -247,9 +285,11 @@ lib/features/orders/
 └── di/orders_module.dart
 ```
 
-For named routing, the feature hook prints the import and route entry to add to
-`lib/core/presentation/app/app.dart`. Route insertion is currently a manual
-step for Clean and MVVM projects.
+ForgeKit also registers the feature's primary screen in the application router.
+For this named-route project it adds the screen import and route entry to
+`lib/core/presentation/app/app.dart`. With GoRouter it imports and spreads the
+feature route list. Re-running the command cannot duplicate a ForgeKit-owned
+registration.
 
 ### 4. Generate an API function from JSON
 
@@ -333,8 +373,9 @@ forgekit add screen orders order_detail
 Expected result:
 
 ```text
-Added screen "OrderDetailScreen".
+Added and registered screen "OrderDetailScreen".
 Created lib/features/orders/presentation/screens/order_detail_screen.dart
+Registered route: /orders/order_detail
 ```
 
 Generated code:
@@ -343,7 +384,7 @@ Generated code:
 class OrderDetailScreen extends StatelessWidget {
   const OrderDetailScreen({super.key});
 
-  static const id = '/order_detail';
+  static const id = '/orders/order_detail';
 
   @override
   Widget build(BuildContext context) {
@@ -355,14 +396,18 @@ class OrderDetailScreen extends StatelessWidget {
 }
 ```
 
-Register the screen in named routes:
+ForgeKit also updates the central named-route map:
 
 ```dart
 routes: {
   '/': (_) => const HomeScreen(),
   OrderDetailScreen.id: (_) => const OrderDetailScreen(),
+  // forgekit:named-routes
 },
 ```
+
+The equivalent GoRouter project receives a `GoRoute` automatically. A Modular
+project receives a child route in the feature module.
 
 ### 6. Add an asset
 
@@ -555,6 +600,27 @@ When a Modular feature is generated, ForgeKit also mounts its module in
 
 Do not pass `--router` with the Modular profile. Flutter Modular owns routing.
 
+### Command support by architecture
+
+ForgeKit refuses unsupported combinations before writing files. It never
+creates Clean Architecture directories inside an MVVM or Modular project as a
+fallback.
+
+| Command family | Clean | MVVM | Modular |
+| --- | --- | --- | --- |
+| App, feature, screen, generic service, storage service | Supported | Supported | Supported |
+| Asset constants, fonts, environment config, flavors | Supported | Supported | Supported |
+| Synced widget installation | Supported | Supported | Supported |
+| Starter widget brick | Supported | Explicitly rejected | Explicitly rejected |
+| JSON `add model` and `add function` | Supported | Explicitly rejected | Explicitly rejected |
+| `add usecase`, model/function tests | Supported | Explicitly rejected | Explicitly rejected |
+| OpenAPI complete-feature import | Supported | Explicitly rejected | Explicitly rejected |
+| Feature rename and removal | Supported | Explicitly rejected | Explicitly rejected |
+
+The explicit rejections are part of the `0.1.0` compatibility contract. They
+will be replaced with profile-native generators only when the resulting code
+can preserve each architecture's boundaries and pass generated-app tests.
+
 ### State management
 
 Choose one project-wide style:
@@ -581,7 +647,7 @@ version: 1
 
 architecture: clean
 state_management: provider
-router: named
+router: go_router
 dependency_injection: injectable
 models: json_serializable
 api_client: retrofit
@@ -602,11 +668,25 @@ The settings currently used directly by generators are:
 - `generation.format`: formats changed Dart files after generation.
 - `generation.build_runner`: controls automatic `build_runner` execution for
   commands that support it.
+- `testing.coverage`: sets the minimum coverage for eligible lines present in
+  Flutter's LCOV report. It is not currently a whole-`lib/` coverage guarantee.
 
-`dependency_injection`, `models`, `api_client`, and `testing.coverage` are
-validated project metadata. The current generators still primarily emit
-Injectable/GetIt, JSON Serializable, and Retrofit code, and the CLI does not
-yet run a coverage threshold check.
+The version 1 file is also an enforceable generator contract. ForgeKit refuses
+recognized but unsupported backend values before it writes generated code. It
+does not silently combine one backend's configuration with another backend's
+templates.
+
+| Architecture | `dependency_injection` | `models` | `api_client` |
+| --- | --- | --- | --- |
+| Clean, MVVM, Lean, Legacy | `injectable` | `json_serializable` | `retrofit` |
+| Flutter Modular | `flutter_modular` | `json_serializable` | `retrofit` |
+
+Those are the generation backends implemented in configuration version 1.
+Values such as `get_it`, `riverpod`, `freezed`, `dio`, and `http` may already
+exist in an adopted application, but they are not selectable ForgeKit code
+generation backends yet. This is separate from `state_management`: Riverpod is
+fully supported as a state manager while Injectable or Flutter Modular still
+owns dependency injection.
 
 Inspect the resolved configuration:
 
@@ -657,7 +737,7 @@ The command surface at a glance:
 | `forgekit config validate` | Validates `forgekit.yaml`. |
 | `forgekit add feature <name>` | Creates a profile-aware feature skeleton. |
 | `forgekit add function ...` | Generates and wires an API operation from JSON. |
-| `forgekit import openapi ...` | Generates complete Clean API features from OpenAPI 3.x. |
+| `forgekit import openapi ...` | Generates complete Clean API features from OpenAPI 3.0/3.1. |
 | `forgekit add model ...` | Generates a domain model and DTO from JSON. |
 | `forgekit add screen ...` | Creates a screen with a route id. |
 | `forgekit add widget <name>` | Installs a synced widget or creates a starter. |
@@ -671,6 +751,7 @@ The command surface at a glance:
 | `forgekit add i18n <locales>` | Creates Flutter localization configuration and ARB files. |
 | `forgekit add string ...` | Adds a localized message to ARB files. |
 | `forgekit add test ...` | Creates starter feature, model, or function tests. |
+| `forgekit test` | Runs Flutter tests and gates the eligible lines reported in LCOV. |
 | `forgekit rename feature ...` | Renames a generated Clean feature and identifiers. |
 | `forgekit remove feature ...` | Removes a generated Clean feature and tests. |
 | `forgekit sync widget ...` | Saves a widget for reuse. |
@@ -679,8 +760,8 @@ The command surface at a glance:
 | `forgekit set splash <image>` | Configures the native splash screen. |
 | `forgekit doctor` | Checks project conformance and optionally repairs safe gaps. |
 | `forgekit diff` | Detects drift since the latest generation. |
-| `forgekit rollback` | Reverses the latest generation safely. |
-| `forgekit update` | Updates the CLI and refreshes its bricks. |
+| `forgekit rollback` | Restores the latest recorded transaction after drift checks. |
+| `forgekit update --ref <commit>` | Installs a reviewed immutable CLI revision and refreshes its bricks. |
 
 ### Global help and version
 
@@ -725,7 +806,10 @@ forgekit setup
 ```
 
 Use this after installing or updating ForgeKit. It installs Mason when needed
-and globally registers the bundled bricks. It is safe to run repeatedly.
+at ForgeKit's tested version (`0.1.3`) and globally registers the bundled
+bricks. It is safe to run repeatedly, but it deliberately replaces existing
+registrations named `forge_app`, `forge_feature`, and the other bundled
+`forge_*` bricks.
 
 No Flutter project is required because this command configures the user's
 ForgeKit and Mason directories.
@@ -776,6 +860,12 @@ Basic call:
 forgekit create app my_app
 ```
 
+The project name must be a lowercase Dart package name such as `shop_app`, not
+a filesystem path. ForgeKit refuses any existing file, directory, or symbolic
+link at the destination. If Flutter or Mason fails after creating the new
+directory, ForgeKit removes the incomplete destination instead of leaving a
+partially generated app.
+
 Non-interactive architecture options:
 
 ```sh
@@ -783,7 +873,30 @@ forgekit create app my_app \
   --org com.example \
   --architecture clean \
   --state-management riverpod \
-  --router go_router
+  --router go_router \
+  --platforms android,ios,web
+```
+
+Create a web-only application without any interactive questions:
+
+```sh
+forgekit create app admin_portal \
+  --org com.example \
+  --architecture mvvm \
+  --state-management bloc \
+  --router go_router \
+  --platforms web
+```
+
+Expected final output, abbreviated:
+
+```text
+Created app "admin_portal" in ./admin_portal
+
+Next steps:
+  cd admin_portal
+  flutter pub get
+  dart run build_runner build
 ```
 
 Add a Google Font during creation:
@@ -803,19 +916,26 @@ Arguments and options:
 | `--architecture` | `clean`, `mvvm`, or `modular`. |
 | `--state-management` | `provider`, `riverpod`, `bloc`, or `cubit`. |
 | `--router` | `named` or `go_router`; unavailable with `modular`. |
+| `--platforms` | Comma-separated Flutter platforms: `android`, `ios`, `web`, `macos`, `windows`, and/or `linux`. |
 
 Interactive behavior:
 
 - If architecture is omitted, ForgeKit asks for Clean, MVVM, or Modular.
 - If state management is omitted, ForgeKit asks for Provider, Riverpod, Bloc,
   or Cubit.
-- ForgeKit always asks which Flutter target platforms should be enabled.
+- In Clean and MVVM projects, if routing is omitted, ForgeKit asks for GoRouter
+  or named routes. GoRouter is the default selection. Modular projects use
+  Flutter Modular routing and do not show this question.
+- If `--platforms` is omitted, ForgeKit asks which Flutter target platforms
+  should be enabled.
+- Supplying architecture, state management, router, and platforms makes app
+  creation fully non-interactive, which is useful in scripts and CI.
 
 Generated result:
 
 ```text
 my_app/
-├── platform folders selected during the prompt
+├── platform folders selected by --platforms or the prompt
 ├── lib/                         # architecture-specific source
 ├── forgekit.yaml                # future generator defaults
 ├── pubspec.yaml                 # architecture dependencies
@@ -832,8 +952,10 @@ forgekit init
 ```
 
 ForgeKit inspects `pubspec.yaml` and `lib/` to infer architecture, state
-management, routing, dependency injection, model generation, and API client.
-It writes configuration only; it does not rewrite the application.
+management, and routing. It then records the supported generation backend for
+that architecture. Existing packages are not misrepresented as selectable
+ForgeKit backends. The command writes configuration only; it does not rewrite
+the application.
 
 Expected result:
 
@@ -842,9 +964,9 @@ Created /work/existing_app/forgekit.yaml.
   architecture: clean
   state management: riverpod
   router: go_router
-  dependency injection: riverpod
+  dependency injection: injectable
   models: json_serializable
-  API client: dio
+  API client: retrofit
 ```
 
 Override ambiguous detection:
@@ -934,8 +1056,19 @@ Expected manager name by state-management profile:
 | Bloc | `OrdersBloc` |
 | Cubit | `OrdersCubit` |
 
-For named routes or GoRouter, follow the route-registration instructions shown
-by the command. Modular module mounting is automatic when the marker exists.
+Route wiring is automatic:
+
+- Named-route projects import the primary screen and add it to the central
+  `MaterialApp.routes` map.
+- GoRouter projects import the generated feature route list and spread it into
+  the central `GoRouter` route collection.
+- Modular projects mount the generated feature module in `app_module.dart`.
+
+ForgeKit-owned insertions are tagged and idempotent. The command fails instead
+of silently leaving an unwired feature when the expected application routing
+location cannot be found. `--router` may be supplied for scripting, but it must
+match the router recorded in `forgekit.yaml`; one application cannot safely mix
+incompatible central router styles.
 
 ### `forgekit add function`
 
@@ -1040,7 +1173,7 @@ forgekit add function create_order --method POST --path /orders
 
 ### `forgekit import openapi`
 
-Import a local OpenAPI 3.x document:
+Import a local OpenAPI 3.0 or 3.1 document:
 
 ```sh
 forgekit import openapi ./openapi.yaml
@@ -1073,7 +1206,7 @@ lib/features/
 
 Each operation can generate:
 
-- Path, query, and header inputs.
+- Path, query, header, and scalar cookie inputs.
 - A typed request payload and DTO.
 - A typed response model and DTO.
 - A parameter object for the use case.
@@ -1081,7 +1214,58 @@ Each operation can generate:
 - Repository contract and implementation methods.
 - A use case.
 - A Provider, Riverpod, Bloc, or Cubit operation.
-- Starter serialization and use-case tests.
+- Executable DTO/model round-trip tests.
+
+For example, a protected `PUT /users/{userId}` operation with a reusable JSON
+request body and response produces code in this shape:
+
+```text
+lib/features/users/
+├── data/
+│   ├── remote/
+│   │   ├── dto/
+│   │   │   ├── update_user_payload_dto.dart
+│   │   │   └── update_user_response_dto.dart
+│   │   └── service/users_api_service.dart
+│   └── repository/users_repository_impl.dart
+├── domain/
+│   ├── entity/
+│   │   ├── model/update_user_response.dart
+│   │   └── payload/
+│   │       ├── update_user_params.dart
+│   │       └── update_user_payload.dart
+│   ├── repository/users_repository.dart
+│   └── usecase/update_user_usecase.dart
+├── presentation/
+│   ├── manager/users_provider.dart
+│   └── screens/users_screen.dart
+└── di/users_module.dart
+
+test/features/users/data/remote/dto/
+├── update_user_payload_dto_test.dart
+└── update_user_response_dto_test.dart
+```
+
+Authentication remains a runtime value. For an HTTP bearer scheme, ForgeKit
+adds an `authorization` parameter rather than writing a token into source:
+
+```dart
+final result = await updateUserUsecase(
+  UpdateUserParams(
+    userId: 'usr_123',
+    authorization: 'Bearer $accessToken',
+    payload: const UpdateUserPayload(name: 'Ada'),
+  ),
+);
+```
+
+Header/query API keys become typed operation parameters. Scalar cookie
+parameters and cookie API keys are URL-encoded and combined into the outgoing
+`Cookie` header. Security alternatives and OAuth scopes are also retained on
+the Retrofit method in `forgekit.security` request metadata, so an application
+Dio interceptor can enforce or resolve credentials centrally. OAuth login,
+token refresh, OpenID Connect discovery, and mutual-TLS certificate ownership
+remain application concerns; a generator cannot safely invent those policies.
 
 Useful options:
 
@@ -1101,18 +1285,31 @@ forgekit import openapi ./openapi.yaml --no-tests --no-build-runner
 
 # Replace an existing feature with the same generated name.
 forgekit import openapi ./openapi.yaml --force
+
+# Permit a trusted local file to fetch its declared HTTPS references.
+forgekit import openapi ./openapi.yaml --allow-remote-references
 ```
 
-Current boundaries:
+OpenAPI support contract:
 
-- Complete-feature import supports the Clean Architecture profile.
-- OpenAPI 3.x JSON and YAML are accepted; Swagger 2 is rejected.
-- Local component references such as `#/components/schemas/User` are
-  supported.
-- External `$ref` documents are not supported yet.
-- JSON bodies and responses receive the strongest support.
-- Security schemes do not automatically configure authentication
-  interceptors.
+| Area | Supported behavior |
+| --- | --- |
+| Versions | OpenAPI 3.0.x and 3.1.x in JSON or YAML. Swagger 2 and OpenAPI 3.2 are rejected. |
+| References | Internal JSON Pointer references and multi-document `$ref` values. Local references must remain below the entry file's directory. A local file requires `--allow-remote-references` before fetching HTTPS references. Remote documents and redirects must remain on the original HTTPS origin. |
+| Components | Reusable schemas, parameters, request bodies, responses, and security schemes. |
+| Schemas | Objects, arrays, primitives, nullable 3.0 schemas, 3.1 type arrays, `additionalProperties`, `allOf`, and practical `oneOf`/`anyOf` object unions. Object unions generate a superset model; incompatible same-name variant properties are rejected. JSON Schema `$id` base-URI changes are rejected rather than resolved incorrectly. |
+| Operations | GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS; default-style path, query, header, and scalar cookie parameters; required and optional JSON bodies; first exact or wildcard `2XX` response, then `default`. |
+| Servers | The first server URL is used and server variables are expanded from their required defaults; `--base-url` can override it. |
+| JSON media | `application/json`, vendor `+json` types, and `*/*`. Unsupported request/response media types fail with a concrete error instead of being generated incorrectly. |
+| Security | API keys in headers, queries, or cookies; HTTP auth; OAuth2; OpenID Connect; mutual TLS; global and operation-level alternatives; OAuth scopes preserved as Retrofit request metadata. |
+| Generated validation | DTO/model JSON round-trip tests plus generated-app `build_runner`, `doctor`, `flutter analyze`, and executable test validation. Coverage-threshold behavior is tested independently by the CLI suite. |
+
+Complete-feature emission currently targets the Clean Architecture profile.
+Multipart/form-data, form-urlencoded and binary bodies, callbacks, webhooks,
+links, generated OAuth flows, and certificate
+provisioning are not emitted in `0.1.0`. These boundaries are explicit because
+claiming every OpenAPI feature while silently dropping behavior would be unsafe
+for a production generator.
 
 Use `--dry-run` before a large import:
 
@@ -1215,8 +1412,29 @@ lib/features/orders/presentation/screens/order_detail_screen.dart
 ```
 
 The generated `StatelessWidget` includes a static route id, an `AppBar`, and a
-placeholder body. Register it manually in the named route map or central
-GoRouter configuration.
+placeholder body. ForgeKit immediately registers it in the configured router.
+
+Expected Clean result:
+
+```text
+Added and registered screen "OrderDetailScreen".
+
+Created lib/features/orders/presentation/screens/order_detail_screen.dart
+Registered route: /orders/order_detail
+```
+
+Generated locations and routing behavior:
+
+| Architecture | Generated screen | Automatic registration |
+| --- | --- | --- |
+| Clean | `lib/features/orders/presentation/screens/order_detail_screen.dart` | Central named map or `GoRouter` list |
+| MVVM | `lib/ui/orders/widgets/order_detail_screen.dart` | Central named map or `GoRouter` list |
+| Modular | `lib/modules/orders/presentation/order_detail_screen.dart` | Child route in `orders_module.dart` |
+
+For Clean and MVVM, additional screen ids are feature-qualified
+(`/orders/order_detail`) to prevent route collisions between features. Modular
+screens use a module-relative child path (`/order_detail`). Registrations carry
+ForgeKit ownership markers, so the same route is never inserted twice.
 
 ### `forgekit add widget`
 
@@ -1281,6 +1499,23 @@ forgekit add widget primary_button --force
 forgekit add service analytics
 ```
 
+In an interactive terminal, omitting `--driver` opens this selection:
+
+```text
+Select service type:
+  generic
+  shared_preferences
+  flutter_secure_storage
+```
+
+Choose `generic` for an SDK adapter or other cross-cutting service whose
+implementation you will complete. For scripts and CI, make that choice
+explicit:
+
+```sh
+forgekit add service analytics --driver generic
+```
+
 Expected file:
 
 ```text
@@ -1292,16 +1527,23 @@ Generated shape:
 ```dart
 @lazySingleton
 class AnalyticsService {
+  bool _initialized = false;
+
+  bool get isInitialized => _initialized;
+
   Future<void> init() async {
-    // Configure the service here.
+    if (_initialized) return;
+
+    // Configure SDKs, permissions, subscriptions, or other resources.
+    _initialized = true;
   }
 }
 ```
 
-After generation:
-
-1. Run `dart run build_runner build` if it was not already run.
-2. Add initialization after `configureDependencies()` in `main.dart`:
+ForgeKit performs the startup wiring itself. In Clean and MVVM projects it
+registers the service through Injectable, runs `build_runner` according to
+`forgekit.yaml`, imports the service in `main.dart`, and inserts initialization
+after `configureDependencies()` but before `runApp`:
 
 ```dart
 await configureDependencies();
@@ -1309,10 +1551,25 @@ await getIt<AnalyticsService>().init();
 runApp(const App());
 ```
 
-The initialization line is currently a documented manual step; the service
-hook prints it but does not edit `main.dart`. This manual step applies to the
-generic service brick. Driver-backed storage services are implemented and
-wired automatically.
+Expected output, abbreviated:
+
+```text
+Added and initialized AnalyticsService.
+
+Generated:
+  lib/services/analytics_service.dart
+Updated:
+  lib/main.dart
+  Injectable dependency graph (via build_runner)
+
+AnalyticsService is initialized before runApp.
+```
+
+For Modular, ForgeKit creates one top-level `analyticsService` instance,
+registers that exact instance in `app_module.dart`, and awaits its `init()` in
+`main.dart`. It does not add an Injectable annotation or run an irrelevant DI
+builder. This guarantees that the instance initialized at startup is the same
+instance later resolved by the application.
 
 #### Local storage with SharedPreferences
 
@@ -1327,8 +1584,8 @@ This single command:
 
 1. Adds `shared_preferences` to `pubspec.yaml` if it is missing.
 2. Creates `lib/services/local_storage_service.dart`.
-3. Generates complete getters, setters, key inspection, removal, clearing, and
-   cache reloading functions.
+3. Generates complete asynchronous getters, setters, key inspection, removal,
+   and clearing functions using `SharedPreferencesAsync`.
 4. Registers the service with Injectable/GetIt in Clean and MVVM projects.
 5. Registers the initialized instance with Flutter Modular in Modular
    projects.
@@ -1373,35 +1630,35 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 @lazySingleton
 class LocalStorageService {
-  late SharedPreferences _preferences;
+  final SharedPreferencesAsync _preferences = SharedPreferencesAsync();
   bool _initialized = false;
 
   bool get isInitialized => _initialized;
 
   Future<void> init() async {
     if (_initialized) return;
-    _preferences = await SharedPreferences.getInstance();
+    await _preferences.getKeys();
     _initialized = true;
   }
 
-  String? getString(String key) {
+  Future<String?> getString(String key) {
     _ensureInitialized();
     return _preferences.getString(key);
   }
 
-  Future<bool> setString(String key, String value) {
+  Future<void> setString(String key, String value) {
     _ensureInitialized();
     return _preferences.setString(key, value);
   }
 
-  Future<bool> remove(String key) {
+  Future<void> remove(String key) {
     _ensureInitialized();
     return _preferences.remove(key);
   }
 
-  Future<bool> clear() {
+  Future<void> clear({Set<String>? allowList}) {
     _ensureInitialized();
-    return _preferences.clear();
+    return _preferences.clear(allowList: allowList);
   }
 
   void _ensureInitialized() {
@@ -1417,24 +1674,23 @@ class LocalStorageService {
 The complete generated API includes:
 
 ```dart
-Object? get(String key);
-String? getString(String key);
-bool? getBool(String key);
-int? getInt(String key);
-double? getDouble(String key);
-List<String>? getStringList(String key);
+Future<Object?> get(String key);
+Future<String?> getString(String key);
+Future<bool?> getBool(String key);
+Future<int?> getInt(String key);
+Future<double?> getDouble(String key);
+Future<List<String>?> getStringList(String key);
 
-Future<bool> setString(String key, String value);
-Future<bool> setBool(String key, bool value);
-Future<bool> setInt(String key, int value);
-Future<bool> setDouble(String key, double value);
-Future<bool> setStringList(String key, List<String> value);
+Future<void> setString(String key, String value);
+Future<void> setBool(String key, bool value);
+Future<void> setInt(String key, int value);
+Future<void> setDouble(String key, double value);
+Future<void> setStringList(String key, List<String> value);
 
-bool containsKey(String key);
-Set<String> getKeys();
-Future<bool> remove(String key);
-Future<bool> clear();
-Future<void> reload();
+Future<bool> containsKey(String key);
+Future<Set<String>> getKeys();
+Future<void> remove(String key);
+Future<void> clear({Set<String>? allowList});
 ```
 
 ForgeKit adds this initialization after dependency configuration and before
@@ -1461,11 +1717,11 @@ class SettingsRepository {
 
   final LocalStorageService _storage;
 
-  bool get hasCompletedOnboarding {
-    return _storage.getBool('completed_onboarding') ?? false;
+  Future<bool> hasCompletedOnboarding() async {
+    return await _storage.getBool('completed_onboarding') ?? false;
   }
 
-  Future<bool> completeOnboarding() {
+  Future<void> completeOnboarding() {
     return _storage.setBool('completed_onboarding', true);
   }
 }
@@ -1473,7 +1729,11 @@ class SettingsRepository {
 
 SharedPreferences is appropriate for non-sensitive values such as theme mode,
 locale, onboarding state, feature preferences, and small cached settings. Do
-not use it for access tokens or secrets.
+not use it for access tokens, secrets, critical writes, or a large application
+database. The generated service uses `SharedPreferencesAsync`, so reads always
+consult the platform implementation rather than relying on a process-local
+cache that can become stale across isolates or Flutter engines. See the
+[official shared_preferences guidance](https://pub.dev/documentation/shared_preferences/latest/).
 
 #### Secure storage with Flutter Secure Storage
 
@@ -1485,6 +1745,15 @@ forgekit add service secure_storage \
 This command performs the same dependency, DI, bootstrap, package, and code
 generation workflow, but creates an encrypted storage wrapper backed by
 `FlutterSecureStorage`.
+
+ForgeKit targets the tested `flutter_secure_storage` 10.x baseline. Review its
+platform setup before shipping: Android applications must use the package's
+current minimum SDK and migration settings; web storage requires HTTPS or
+localhost; Linux requires the documented `libsecret` development/runtime
+packages; and Apple/Windows applications must satisfy their
+Keychain/credential-store build requirements. Follow the
+[upstream platform instructions](https://pub.dev/packages/flutter_secure_storage)
+and test upgrades against existing encrypted values before release.
 
 Expected result:
 
@@ -1785,6 +2054,14 @@ vary significantly between applications.
 
 ### `forgekit add env` and `forgekit set env`
 
+> **Do not put secrets in generated environment JSON.** Files under
+> `assets/env/` are bundled application assets and can be extracted from a
+> shipped client. They are suitable for public configuration such as base URLs,
+> feature flags, and display settings—not private keys, signing material,
+> passwords, or privileged API credentials. Flutter likewise warns that
+> obfuscation does not protect secrets stored in an app; see
+> [Obfuscate Dart code](https://docs.flutter.dev/deployment/obfuscate#limitations-and-warnings).
+
 Create environment files:
 
 ```sh
@@ -1825,6 +2102,34 @@ Set the same value in every environment:
 forgekit set env ENABLE_LOGGING true --all
 ```
 
+ForgeKit rejects secret-like keys by default:
+
+```sh
+forgekit set env ACCESS_TOKEN abc123 --environment dev
+```
+
+Expected result:
+
+```text
+ACCESS_TOKEN looks like a secret or credential. ForgeKit refused to write it
+to assets/env because bundled Flutter assets are public client data.
+```
+
+Some providers issue identifiers named `API_KEY` that are explicitly designed
+to ship in clients and are protected with platform, application-id, origin, or
+API restrictions. After confirming that contract and applying those
+restrictions, acknowledge the exposure explicitly:
+
+```sh
+forgekit set env MAPS_API_KEY public_provider_key \
+  --environment dev \
+  --allow-public-value
+```
+
+`forgekit doctor` reports every secret-like key found in existing
+`assets/env/*.json` files without reading or printing its value. `doctor --ci`
+treats that warning as a failure so the key receives deliberate review.
+
 Load an environment before `runApp`:
 
 ```dart
@@ -1844,6 +2149,13 @@ final logging = EnvConfig.boolValue('ENABLE_LOGGING');
 
 Values set by the CLI are stored as JSON strings. The generated accessors can
 coerce common boolean and integer string values.
+
+Transaction metadata records only the command path (`forgekit set env`), not
+keys, values, URLs, paths, or options. Values typed on a command line can still
+remain in shell history or CI logs. More importantly, anything accepted by this
+command is shipped in the application. Use backend-issued runtime credentials,
+platform secure storage for revocable session material, and server-side secret
+management instead of bundling privileged credentials.
 
 ### `forgekit add i18n` and `forgekit add string`
 
@@ -1938,6 +2250,79 @@ starter test.
 Model and function tests are starters because constructors, fake repositories,
 and meaningful expected values depend on the application domain.
 
+### `forgekit test`
+
+Run the project's Flutter tests and enforce the configured threshold against
+the eligible lines present in Flutter's LCOV report:
+
+```sh
+forgekit test
+```
+
+ForgeKit runs `flutter test --coverage`, reads `coverage/lcov.info`, counts
+unique executable lines reported under `lib/`, excludes common generated Dart
+outputs such as `*.g.dart`, `*.freezed.dart`, `*.config.dart`, and
+`*.mocks.dart`, and compares that reported result with `testing.coverage`.
+
+Flutter can omit libraries that the test run never loads. ForgeKit therefore
+compares LCOV source records with eligible `lib/**/*.dart` files and fails the
+gate if any production library is absent. Generated outputs with supported
+suffixes such as `.g.dart`, `.freezed.dart`, `.config.dart`, and `.mocks.dart`
+remain excluded. This fail-closed check prevents an apparently high percentage
+from hiding completely untested source files.
+
+Expected passing result:
+
+```text
+Running: flutter test --coverage
+00:03 +18: All tests passed!
+✓ Coverage 86.42% (140/162 lines) meets the configured 80% threshold.
+```
+
+Expected threshold failure:
+
+```text
+Running: flutter test --coverage
+00:03 +18: All tests passed!
+✗ Coverage 74.69% (121/162 lines) is below the configured 80% threshold.
+```
+
+Both a failing Flutter test suite and a missed coverage threshold return a
+non-zero process exit code, so the command can be used directly in CI:
+
+```yaml
+- name: Test and enforce coverage
+  run: forgekit test
+```
+
+The command generates Flutter's normal coverage artifact:
+
+```text
+your_app/
+├── coverage/
+│   └── lcov.info
+├── lib/
+├── test/
+└── forgekit.yaml
+```
+
+Forward Flutter test arguments after `--`:
+
+```sh
+forgekit test -- test/unit --name "serializes an order"
+```
+
+ForgeKit owns the coverage flags so that a caller cannot redirect or replace
+the report being enforced. To run tests without collecting or checking
+coverage—for example during a fast local edit loop—use:
+
+```sh
+forgekit test --no-coverage
+```
+
+CI should normally use the default coverage-enabled behavior, with the
+whole-project limitation above understood.
+
 ### `forgekit rename feature`
 
 ```sh
@@ -1986,10 +2371,13 @@ lib/features/purchases/
 test/features/purchases/
 ```
 
-The command does not automatically remove every external route or dependency
-reference. Review route registration and other cross-feature references after
-removal. Because removal is transactional, `forgekit rollback` can restore the
-latest successful removal when no later edits conflict.
+ForgeKit removes the feature folder, generated tests, and route imports and
+registrations that carry ForgeKit ownership markers. User-authored routes and
+similarly named features (for example, removing `orders` does not touch
+`orders_archive`) are preserved. Review other user-authored cross-feature
+dependencies after removal. Because removal is transactional, `forgekit
+rollback` can restore the latest successful removal when no later edits
+conflict.
 
 ### `forgekit sync widget`
 
@@ -2036,6 +2424,12 @@ Connect a Git-backed team registry:
 ```sh
 forgekit registry connect https://github.com/your-org/forgekit_registry.git
 ```
+
+ForgeKit accepts HTTPS, SSH, `file:` URLs, and local paths. It rejects plaintext
+`http://` and `git://` transports, URL query strings/fragments, and URLs with
+embedded usernames, passwords, or tokens. Keep GitHub/GitLab credentials in the
+operating system's Git credential manager or an SSH agent; ForgeKit does not
+write them to `~/.forgekit/registry.json`.
 
 By default the repository is cloned into `~/.forgekit/registry`. Choose another
 directory with:
@@ -2093,9 +2487,10 @@ then runs:
 dart run flutter_launcher_icons
 ```
 
-If the supporting command fails, the configuration remains written and
-ForgeKit prints the manual command to retry. Android and iOS are enabled by the
-generated configuration.
+If `flutter pub get` or the icon generator fails, ForgeKit returns that non-zero
+exit code and the surrounding `set` transaction restores the copied asset and
+`pubspec.yaml`. Fix the reported upstream problem and rerun `forgekit set icon`.
+Android and iOS are enabled by the generated configuration.
 
 ### `forgekit set splash`
 
@@ -2118,6 +2513,10 @@ section, runs `flutter pub get`, and then runs:
 dart run flutter_native_splash:create
 ```
 
+As with icon generation, an upstream failure returns a non-zero exit code and
+restores the project transaction. Fix the reported error and rerun
+`forgekit set splash`; CI will not receive a false success.
+
 ### `forgekit doctor`
 
 Check the current project against its configured architecture:
@@ -2127,7 +2526,8 @@ forgekit doctor
 ```
 
 Doctor checks required core files, feature files, class declarations,
-state-manager naming, dependency annotations, and Modular feature mounts.
+state-manager naming, dependency annotations, Modular feature mounts, and
+secret-like keys in bundled environment assets.
 
 Example failure:
 
@@ -2168,7 +2568,7 @@ forgekit diff
 Expected clean result:
 
 ```text
-Latest transaction 20260715T120000000Z (forgekit add feature orders):
+Latest transaction 20260715T120000000Z (forgekit add feature):
   unchanged  lib/features/orders/...
 No files have drifted since the latest generation.
 ```
@@ -2210,16 +2610,22 @@ forgekit rollback --force
 ### `forgekit update`
 
 ```sh
-forgekit update
+forgekit update \
+  --ref 0123456789abcdef0123456789abcdef01234567
 ```
 
-This reactivates the CLI from the configured GitHub repository and runs setup
-again to refresh the locally installed bricks.
+Replace the example with the complete commit SHA reviewed by your team. ForgeKit
+rejects branches, tags, `HEAD`, and abbreviated SHAs. It passes the exact commit
+to Dart Pub through `--git-ref`, then runs setup to refresh the locally installed
+bricks with the pinned Mason CLI version.
+
+Running `forgekit update` without `--ref`, or passing `main`, fails before any
+process is started.
 
 Expected final output:
 
 ```text
-Flutter ForgeKit CLI updated from GitHub.
+Flutter ForgeKit CLI updated to commit 0123456789ab.
 ```
 
 ## Generated project structures
@@ -2313,8 +2719,14 @@ lib/modules/orders/
 
 ## Generation safety and rollback
 
-ForgeKit wraps supported project-changing commands in a generation
-transaction.
+ForgeKit wraps the `add`, `config`, `doctor`, `init`, `import`, `remove`,
+`rename`, and `set` command groups in a generation transaction when they run
+inside a detected Flutter project.
+
+`create app`, `setup`, `update`, `registry`, and `sync` are not covered by this
+project transaction mechanism. `create app` instead refuses existing targets
+and removes the new destination after a handled creation failure. Use normal
+Git and remote-repository controls for the remaining external/global effects.
 
 ### What is recorded
 
@@ -2334,7 +2746,8 @@ On success, ForgeKit creates:
 
 The transaction includes:
 
-- The command text.
+- The command path only, such as `forgekit add service` or `forgekit set env`.
+  Positional arguments and option values are deliberately excluded.
 - Created, modified, and deleted paths.
 - Before and after SHA-256 hashes.
 - Before and after line counts.
@@ -2344,13 +2757,29 @@ The transaction includes:
 
 If a generator returns a failure or generated Dart cannot be formatted,
 ForgeKit restores the original project snapshot. This prevents half-generated
-features or partially edited repositories from being left behind.
+features or partially edited repositories in normal handled failures. An
+abrupt process kill, machine failure, or external tool side effect cannot be
+guaranteed to restore cleanly; Git remains the authoritative safety net.
 
 ### Important scope
 
 Transactions apply to ForgeKit project mutations. External side effects such
 as a remote Git push, package download, or global tool installation are outside
 the target project snapshot.
+
+To calculate changes and support restoration, ForgeKit snapshots project files
+while excluding source-control metadata and common generated/cache trees such
+as `.git/`, `.dart_tool/`, `.forgekit/`, `build/`, `coverage/`, Gradle caches,
+CocoaPods, symlink caches, and DerivedData. Large source/assets trees can still
+incur memory, disk, and startup overhead. ForgeKit retains the newest 20
+transaction backup directories under `.forgekit/backups/` and prunes older
+ones after a successful transaction.
+
+Early development builds recorded complete commands. Updating ForgeKit does not
+rewrite existing project history, so audit or remove old
+`.forgekit/backups/*/transaction.json` files if those builds were used with
+sensitive arguments. New transactions retain only the non-sensitive command
+path.
 
 ## Using ForgeKit in a monorepo
 
@@ -2400,6 +2829,11 @@ later. See the
 
 Normal users should run `forgekit setup` instead of registering bricks
 manually. The commands below are useful for CLI development and brick testing:
+
+Direct `mason make` calls render a brick only. They bypass ForgeKit's route and
+service orchestration, configuration validation, formatting transaction,
+`--package` resolution, and rollback history. Use the `forgekit` commands for
+normal application work.
 
 ```sh
 mason add -g forge_app --path bricks/forge_app
@@ -2473,6 +2907,89 @@ flutter analyze
 flutter test
 ```
 
+### Generated-application smoke tests
+
+ForgeKit's own unit tests verify parsers and generators, but the smoke runner
+goes further: it creates real Flutter applications and compiles the generated
+result. Every case performs this sequence:
+
+```text
+forgekit setup
+forgekit create app ... --platforms web
+forgekit add feature smoke_feature --with-tests --no-build-runner
+forgekit add screen smoke_feature details
+forgekit add service analytics --driver generic --no-build-runner
+optional storage-service generation
+flutter pub get
+dart run build_runner build
+forgekit doctor --ci
+flutter analyze
+forgekit test --no-coverage
+```
+
+The smoke runner disables the configured coverage threshold because starter
+tests prove that generated code compiles and executes; they are not intended
+to give a newly scaffolded application 80% production coverage immediately.
+Normal project CI should continue to run `forgekit test` with coverage enabled.
+
+Run the four representative cases used for push and pull-request CI:
+
+```sh
+dart run tool/generated_app_smoke.dart
+```
+
+Those cases collectively cover:
+
+```text
+clean + provider + named routes       + shared_preferences
+clean + cubit + go_router
+mvvm  + riverpod + go_router          + flutter_secure_storage
+modular + bloc + Modular routing      + both storage drivers
+```
+
+Expected final result:
+
+```text
+All 4 generated-app smoke case(s) passed.
+```
+
+Run one case while repairing a template:
+
+```sh
+dart run tool/generated_app_smoke.dart \
+  --case clean_provider_named \
+  --keep \
+  --work-dir /tmp/forgekit-smoke
+```
+
+`--keep` preserves a successful run that uses the default temporary workspace.
+A custom `--work-dir` is also preserved. Failed runs are always preserved, and
+the runner prints their location so the generated source can be inspected
+directly.
+
+Run the complete 20-case architecture/state/router matrix:
+
+```sh
+dart run tool/generated_app_smoke.dart --all
+```
+
+The full matrix consists of Clean and MVVM combined with all four supported
+state managers and both route styles, plus Modular combined with all four state
+managers. `.github/workflows/generated-app-quality.yml` runs the four fast
+representative cases and a real generated Android debug build on pushes and
+pull requests. CLI analysis and unit tests run on Linux, macOS, and Windows.
+The complete generation matrix runs every Sunday and whenever the workflow is
+started manually.
+
+Run the Android compilation check locally when the Android toolchain is
+installed:
+
+```sh
+dart run tool/generated_app_smoke.dart \
+  --case clean_provider_named \
+  --build-android
+```
+
 ### Repository layout
 
 ```text
@@ -2485,24 +3002,59 @@ forgekit_cli/
 │       ├── commands/                  # command parsing and validation
 │       └── *_service.dart             # generation and project operations
 ├── bricks/                            # Mason app/feature/widget/service bricks
-├── docs/ARCHITECTURE_STANDARD.md
+├── doc/ARCHITECTURE_STANDARD.md
 ├── test/
+├── tool/generated_app_smoke.dart      # real generated-app compiler matrix
+├── .github/workflows/                 # CLI and generated-app CI
+├── CHANGELOG.md
+├── README.md
+├── SECURITY.md
 ├── mason.yaml
 └── pubspec.yaml
 ```
 
 ## Security notes
 
+Report suspected vulnerabilities privately through the repository's
+[security policy](SECURITY.md); do not disclose credentials or exploit details
+in a public issue.
+
 - ForgeKit runs with the current terminal user's permissions.
 - Run it only in projects you trust and review generated code before shipping.
-- JSON and OpenAPI inputs are parsed locally, but remote OpenAPI URLs are
-  downloaded over the network.
+- JSON and local OpenAPI inputs are parsed locally. Remote OpenAPI entries
+  require HTTPS; local files cannot fetch remote `$ref` documents unless
+  `--allow-remote-references` is passed, and redirects remain same-origin.
+- Generated networking does not install a request/response logger. Add only
+  application-owned debug logging that redacts credentials and private bodies.
 - Font generation downloads CSS and font files from Google Fonts.
 - Asset, icon, and splash commands copy source files into the target project.
 - `build_runner`, Flutter package tools, Mason, Git, and globally activated Dart
   tools execute as child processes where required.
 - A shared widget registry can contain Dart source. Review registry changes and
-  trust its maintainers before installing synced widgets.
+  trust its maintainers before installing synced widgets. Registry connection
+  rejects insecure transports and credential-bearing URLs.
+- Generated `assets/env/*.json` files are public client configuration, not a
+  secret store. ForgeKit rejects secret-like keys unless a publishable client
+  value is explicitly acknowledged, and `doctor --ci` surfaces such keys for
+  review. Command-line values can still remain in shell history.
+- Transaction metadata stores only command paths and deliberately omits
+  arguments and option values. Audit transaction files created by older
+  development builds because they are not migrated automatically.
+- Installation and `forgekit update` should use a reviewed full commit SHA;
+  the update command rejects mutable or abbreviated refs. `setup` activates the
+  Mason CLI version tested with this ForgeKit release.
+- GitHub Actions dependencies are pinned to full commit SHAs and workflow token
+  permissions are read-only, following
+  [GitHub's secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#using-third-party-actions).
+- Dart, Git, and Mason child processes are launched directly without a shell.
+  Flutter's Windows batch wrapper is used only with validated ForgeKit inputs;
+  forwarded test arguments containing Windows shell-control characters are
+  rejected.
+- ForgeKit is licensed under the
+  [Apache License 2.0](LICENSE), including its explicit patent grant.
+- `create app` accepts a Dart package name rather than a path, rejects every
+  existing target type, and cleans its newly owned directory after handled
+  failures.
 - `rollback --force` can overwrite edits made after generation. Use `diff` and
   Git before forcing a rollback.
 
@@ -2511,22 +3063,38 @@ forgekit_cli/
 | Problem | Explanation and fix |
 | --- | --- |
 | `forgekit: command not found` | Add `~/.pub-cache/bin` to `PATH`, then reactivate the package. |
-| `Mason not found` | Run `forgekit setup`; confirm the Dart global bin directory is on `PATH`. |
+| Mason cannot be executed | Run `forgekit setup`; ForgeKit activates and executes its pinned Mason version through Dart Pub rather than relying on a shell wrapper. |
 | Mason cannot find a ForgeKit brick | Re-run `forgekit setup` after installing or updating the CLI. |
 | `flutter` cannot be started | Install Flutter and ensure `flutter` is on `PATH`. |
 | Generated code references missing `.g.dart` files | Run `dart run build_runner build`. |
 | `build_runner` reports conflicting outputs | Review the conflicts, then use the appropriate `build_runner` cleanup option for the project. |
 | A feature command generated in the wrong directory | Run project-level Mason commands from the Flutter package root, or use `--package` in a pub workspace. |
 | Feature inference fails | Pass the feature explicitly, for example `forgekit add screen orders detail`. |
-| A route is missing at runtime | Add the generated screen/route list to the app's named route map or GoRouter configuration. |
-| A generated service is not initialized | Add `await getIt<Service>().init()` after dependency configuration in `main.dart`. |
+| Route generation fails or a route is missing | Current templates wire named, GoRouter, and Modular routes automatically. Restore the relevant ForgeKit route marker, verify `forgekit.yaml` matches the project, and rerun the command; do not maintain a second manual route system. |
+| Service generation cannot insert initialization | Current templates initialize generated services automatically before `runApp`. Verify that `main.dart` still contains `// forgekit:service-initializers`, restore the marker if it was intentionally removed, and rerun the command. |
+| Coverage is unexpectedly high | Inspect `coverage/lcov.info`; libraries never loaded by the tests can be absent and are not counted as zero in `0.1.0`. |
+| Icon or splash generation fails | ForgeKit returns the upstream failure and restores the `set` transaction. Fix the Flutter/package error, then rerun the ForgeKit command. |
+| `set env` rejects a provider key | Bundled assets cannot protect secrets. If the provider explicitly documents the key as publishable client configuration, restrict it at the provider and rerun with `--allow-public-value`; otherwise move it server-side. |
+| `forgekit update` rejects a ref | Pass a reviewed complete 40- or 64-character commit SHA. Branches, tags, `HEAD`, and abbreviated SHAs are intentionally rejected. |
+| Registry connection rejects a URL | Use HTTPS, SSH, or a local path without embedded credentials or query parameters. Configure authentication with the Git credential manager or SSH agent. |
+| A forwarded test name is rejected on Windows | Remove `cmd.exe` control characters such as `&`, `|`, `%`, or `!`; Flutter is distributed as a Windows batch wrapper. |
 | Font lookup fails | Check the exact family name on Google Fonts and quote names containing spaces. |
-| OpenAPI import rejects the document | Confirm it is OpenAPI 3.x, uses supported local references, and the project uses the Clean profile. |
+| OpenAPI import rejects the document | Confirm it is OpenAPI 3.0 or 3.1, uses a supported JSON media type, keeps local references below the entry directory, uses HTTPS for remote input, opts into trusted remote references when needed, and the project uses the Clean profile. |
 | Rollback refuses to continue | Run `forgekit diff`, preserve or commit manual edits, then decide whether `rollback --force` is appropriate. |
 | `--package` cannot find the app | Run `forgekit workspace list` and use the declared pubspec name or workspace-relative path. |
 
+## License
+
+Copyright 2026 Emmanuel Oluwadamilola.
+
+Flutter ForgeKit CLI is licensed under the
+[Apache License, Version 2.0](LICENSE). The license permits commercial and
+private use, modification, and redistribution subject to its conditions, and
+includes an explicit patent grant. It is provided without warranties or
+conditions of any kind.
+
 ## Related
 
-- [Flutter ForgeKit CLI Architecture Standard](docs/ARCHITECTURE_STANDARD.md)
+- [Flutter ForgeKit CLI Architecture Standard](doc/ARCHITECTURE_STANDARD.md)
 - Flutter ForgeKit VS Code Extension: companion editor interface that dispatches
   commands to this CLI.

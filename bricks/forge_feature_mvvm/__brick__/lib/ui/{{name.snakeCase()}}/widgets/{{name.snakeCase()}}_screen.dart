@@ -31,7 +31,7 @@ import 'package:{{projectName}}/ui/core/view_models/view_state.dart';
 {{#useProvider}}    return ChangeNotifierProvider(
       create: (_) => getIt<{{name.pascalCase()}}ViewModel>(),
       child: Consumer<{{name.pascalCase()}}ViewModel>(
-        builder: (_, viewModel, __) =>
+        builder: (_, viewModel, _) =>
             _{{name.pascalCase()}}View(state: viewModel.state),
       ),
     );

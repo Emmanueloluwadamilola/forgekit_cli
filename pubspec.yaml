@@ -4,9 +4,11 @@ description: >-
   configurable architecture standard.
 version: 0.1.0
 publish_to: none
+repository: https://github.com/Emmanueloluwadamilola/forgekit_cli
+issue_tracker: https://github.com/Emmanueloluwadamilola/forgekit_cli/issues
 
 environment:
-  sdk: ">=3.0.0 <4.0.0"
+  sdk: ">=3.5.4 <4.0.0"
 
 executables:
   forgekit: forgekit
@@ -18,6 +20,7 @@ dependencies:
   mason: ^0.1.1
   mason_logger: ^0.3.0
   path: ^1.9.0
+  pub_semver: ^2.2.0
   yaml: ^3.1.2
   yaml_edit: ^2.2.0
 

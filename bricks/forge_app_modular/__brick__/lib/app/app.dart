@@ -16,7 +16,7 @@ import '../core/theme/theme_controller.dart';
   Widget build(BuildContext context) => ChangeNotifierProvider(
         create: (_) => ThemeController(),
         child: Consumer<ThemeController>(
-          builder: (_, controller, __) =>
+          builder: (_, controller, _) =>
               _AppView(themeMode: controller.mode),
         ),
       );

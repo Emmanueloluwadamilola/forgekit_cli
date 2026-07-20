@@ -6,7 +6,8 @@ final List<RouteBase> {{name.camelCase()}}Routes = [
   GoRoute(
     path: {{name.pascalCase()}}Screen.id,
     name: {{name.pascalCase()}}Screen.id,
-    builder: (_, __) => const {{name.pascalCase()}}Screen(),
+    builder: (_, _) => const {{name.pascalCase()}}Screen(),
   ),
+  // forgekit:feature-routes
 ];
 {{/useRouter}}

@@ -11,12 +11,18 @@ const supportedStateManagement = ['provider', 'riverpod', 'bloc', 'cubit'];
 const supportedRouters = ['named', 'go_router', 'modular'];
 const supportedDependencyInjection = [
   'injectable',
-  'get_it',
-  'riverpod',
   'flutter_modular',
 ];
-const supportedModels = ['json_serializable', 'freezed'];
-const supportedApiClients = ['retrofit', 'dio', 'http'];
+const supportedModels = ['json_serializable'];
+const supportedApiClients = ['retrofit'];
+
+const _recognizedDependencyInjection = [
+  ...supportedDependencyInjection,
+  'get_it',
+  'riverpod',
+];
+const _recognizedModels = [...supportedModels, 'freezed'];
+const _recognizedApiClients = [...supportedApiClients, 'dio', 'http'];
 
 List<String> stateManagementMasonFlags(String stateManagement) => [
       '--useProvider',
@@ -158,13 +164,46 @@ class ForgeKitConfig {
       supportedStateManagement,
     );
     _validateChoice('router', router, supportedRouters);
-    _validateChoice(
+    _validateGenerationBackend(
       'dependency_injection',
       dependencyInjection,
       supportedDependencyInjection,
+      _recognizedDependencyInjection,
     );
-    _validateChoice('models', models, supportedModels);
-    _validateChoice('api_client', apiClient, supportedApiClients);
+    _validateGenerationBackend(
+      'models',
+      models,
+      supportedModels,
+      _recognizedModels,
+    );
+    _validateGenerationBackend(
+      'api_client',
+      apiClient,
+      supportedApiClients,
+      _recognizedApiClients,
+    );
+    final expectedDependencyInjection =
+        architecture == 'modular' ? 'flutter_modular' : 'injectable';
+    if (dependencyInjection != expectedDependencyInjection) {
+      throw ConfigException(
+        'architecture "$architecture" requires dependency_injection '
+        '"$expectedDependencyInjection" in forgekit.yaml version 1. '
+        'Received "$dependencyInjection".',
+      );
+    }
+    final expectedRouter = architecture == 'modular' ? 'modular' : null;
+    if (expectedRouter != null && router != expectedRouter) {
+      throw ConfigException(
+        'architecture "modular" requires router "modular". '
+        'Received "$router".',
+      );
+    }
+    if (architecture != 'modular' && router == 'modular') {
+      throw ConfigException(
+        'router "modular" requires architecture "modular". '
+        'Received architecture "$architecture".',
+      );
+    }
     if (minimumCoverage < 0 || minimumCoverage > 100) {
       throw const ConfigException(
         'testing.coverage must be between 0 and 100.',
@@ -224,8 +263,26 @@ Future<void> saveForgeKitConfig({
   await file.parent.create(recursive: true);
   final temporary = File('${file.path}.tmp');
   await temporary.writeAsString(config.toYaml(), flush: true);
-  if (file.existsSync()) await file.delete();
-  await temporary.rename(file.path);
+  await _replaceFile(temporary, file);
+}
+
+Future<void> _replaceFile(File temporary, File destination) async {
+  if (!destination.existsSync() || !Platform.isWindows) {
+    await temporary.rename(destination.path);
+    return;
+  }
+  final backup = File('${destination.path}.forgekit-backup');
+  if (backup.existsSync()) await backup.delete();
+  await destination.rename(backup.path);
+  try {
+    await temporary.rename(destination.path);
+    await backup.delete();
+  } catch (_) {
+    if (!destination.existsSync() && backup.existsSync()) {
+      await backup.rename(destination.path);
+    }
+    rethrow;
+  }
 }
 
 ForgeKitConfig detectForgeKitConfig({
@@ -265,36 +322,22 @@ ForgeKitConfig detectForgeKitConfig({
               : _hasCleanArchitecture(root)
                   ? 'clean'
                   : 'lean');
-  final router = dependencyNames.contains('flutter_modular')
+  final router = detectedArchitecture == 'modular'
       ? 'modular'
       : dependencyNames.contains('go_router')
           ? 'go_router'
           : 'named';
-  final dependencyInjection = dependencyNames.contains('flutter_modular')
-      ? 'flutter_modular'
-      : dependencyNames.contains('injectable')
-          ? 'injectable'
-          : dependencyNames.contains('get_it')
-              ? 'get_it'
-              : detectedState == 'riverpod'
-                  ? 'riverpod'
-                  : 'get_it';
-  final models =
-      dependencyNames.contains('freezed') ? 'freezed' : 'json_serializable';
-  final apiClient = dependencyNames.contains('retrofit')
-      ? 'retrofit'
-      : dependencyNames.contains('dio')
-          ? 'dio'
-          : 'http';
+  final dependencyInjection =
+      detectedArchitecture == 'modular' ? 'flutter_modular' : 'injectable';
 
-  return ForgeKitConfig(
+  final config = ForgeKitConfig(
     architecture: detectedArchitecture,
     stateManagement: detectedState,
     router: router,
     dependencyInjection: dependencyInjection,
-    models: models,
-    apiClient: apiClient,
   );
+  config.validate();
+  return config;
 }
 
 bool _hasMvvmArchitecture(Directory root) {
@@ -378,6 +421,26 @@ void _validateChoice(String key, String value, List<String> choices) {
       '$key must be one of: ${choices.join(', ')}. Received "$value".',
     );
   }
+}
+
+void _validateGenerationBackend(
+  String key,
+  String value,
+  List<String> supported,
+  List<String> recognized,
+) {
+  if (supported.contains(value)) return;
+  if (recognized.contains(value)) {
+    throw ConfigException(
+      '$key "$value" is recognized but is not supported for generation in '
+      'forgekit.yaml version 1. Supported: ${supported.join(', ')}. ForgeKit '
+      'refuses this configuration instead of emitting a mixed technology stack.',
+    );
+  }
+  throw ConfigException(
+    '$key must be one of the supported generation backends: '
+    '${supported.join(', ')}. Received "$value".',
+  );
 }
 
 String _normalizeStateManagement(String value) {

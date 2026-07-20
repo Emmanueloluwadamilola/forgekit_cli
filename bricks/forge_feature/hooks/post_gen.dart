@@ -46,28 +46,11 @@ Future<void> run(HookContext context) async {
         routesFile.readAsStringSync().trim().isEmpty) {
       routesFile.deleteSync();
     }
-    logger.info(
-      '  1. Register the screen route in core/presentation/app/app.dart '
-      'inside the `routes` map:',
-    );
-    logger.info('');
-    logger.info('       ${pascal}Screen.id: (_) => const ${pascal}Screen(),');
-    logger.info('');
-    logger.info(
-      '     (import: '
-      "import 'package:<project>/features/$snake/presentation/screens/${snake}_screen.dart';)",
-    );
+    logger.info('  1. The forgekit command registers ${pascal}Screen in the '
+        'named route table. Direct Mason use must integrate it separately.');
   } else {
-    logger.info(
-      '  1. Ensure go_router is in pubspec.yaml (e.g. go_router: ^14.0.0), then '
-      'register the feature routes in your central AppRouter:',
-    );
-    logger.info('');
-    logger.info('       GoRouter(routes: [ ...${camel}Routes ]);');
-    logger.info('');
-    logger.info(
-      '     (defined in features/$snake/presentation/${snake}_routes.dart)',
-    );
+    logger.info('  1. The forgekit command registers ${camel}Routes in the '
+        'central GoRouter. Direct Mason use must integrate it separately.');
   }
 
   logger.info(
@@ -83,7 +66,6 @@ Future<void> run(HookContext context) async {
       final result = await Process.run(
         'dart',
         ['run', 'build_runner', 'build'],
-        runInShell: true,
       );
       if (result.exitCode == 0) {
         logger.success('build_runner completed successfully.');

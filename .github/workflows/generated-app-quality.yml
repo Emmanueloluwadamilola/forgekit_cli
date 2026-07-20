@@ -1,0 +1,156 @@
+name: Generated app quality
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generated-app-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    name: ForgeKit CLI / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.44.3"
+          channel: stable
+          cache: true
+
+      - name: Resolve CLI dependencies
+        run: dart pub get
+
+      - name: Analyze CLI
+        run: dart analyze
+
+      - name: Test CLI
+        run: dart test
+
+  representative-apps:
+    name: Smoke / ${{ matrix.case }}
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - clean_provider_named
+          - clean_cubit_go_router
+          - mvvm_riverpod_go_router
+          - modular_bloc
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.44.3"
+          channel: stable
+          cache: true
+
+      - name: Resolve CLI dependencies
+        run: dart pub get
+
+      - name: Install Mason CLI
+        run: |
+          dart pub global activate mason_cli 0.1.3
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Generate, analyze, and test app
+        run: dart run tool/generated_app_smoke.dart --case "${{ matrix.case }}"
+
+  full-app-matrix:
+    name: Full matrix / ${{ matrix.case }}
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - clean_provider_named
+          - clean_provider_go_router
+          - clean_riverpod_named
+          - clean_riverpod_go_router
+          - clean_bloc_named
+          - clean_bloc_go_router
+          - clean_cubit_named
+          - clean_cubit_go_router
+          - mvvm_provider_named
+          - mvvm_provider_go_router
+          - mvvm_riverpod_named
+          - mvvm_riverpod_go_router
+          - mvvm_bloc_named
+          - mvvm_bloc_go_router
+          - mvvm_cubit_named
+          - mvvm_cubit_go_router
+          - modular_provider
+          - modular_riverpod
+          - modular_bloc
+          - modular_cubit
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.44.3"
+          channel: stable
+          cache: true
+
+      - name: Resolve CLI dependencies
+        run: dart pub get
+
+      - name: Install Mason CLI
+        run: |
+          dart pub global activate mason_cli 0.1.3
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Generate, analyze, and test app
+        run: dart run tool/generated_app_smoke.dart --case "${{ matrix.case }}"
+
+  android-generated-app:
+    name: Generated Android debug build
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: "3.44.3"
+          channel: stable
+          cache: true
+
+      - name: Resolve CLI dependencies
+        run: dart pub get
+
+      - name: Install Mason CLI
+        run: |
+          dart pub global activate mason_cli 0.1.3
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Generate, validate, and compile Android app
+        run: >-
+          dart run tool/generated_app_smoke.dart
+          --case clean_provider_named
+          --build-android

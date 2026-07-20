@@ -2,6 +2,7 @@
 .packages
 build/
 coverage/
+/coverage_review/
 pubspec_overrides.yaml
 *.log
 .DS_Store

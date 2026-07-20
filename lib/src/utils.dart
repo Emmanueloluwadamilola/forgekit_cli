@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+/// Mason CLI version tested with this ForgeKit release.
+const supportedMasonCliVersion = '0.1.3';
+
 /// Shared helpers used across the `forgekit` commands.
 
 /// Walks up from [start] (default: current directory) looking for the nearest
@@ -50,18 +53,17 @@ Future<int> runMason(
   final log = logger ?? Logger();
   try {
     final result = await Process.start(
-      'mason',
-      args,
+      'dart',
+      ['pub', 'global', 'run', 'mason_cli:mason', ...args],
       workingDirectory: workingDirectory,
       // Inherit the parent's stdio so Mason prompts/output stream live.
       mode: ProcessStartMode.inheritStdio,
-      runInShell: true,
     );
     return result.exitCode;
   } on ProcessException {
     log.err(
-      'Mason not found. Install with: '
-      'dart pub global activate mason_cli',
+      'Could not run Mason CLI $supportedMasonCliVersion through Dart Pub. '
+      'Run: forgekit setup',
     );
     return 1;
   }
@@ -94,3 +96,9 @@ String detectProjectName({String fallback = 'app', Directory? root}) {
   }
   return fallback;
 }
+
+/// Encodes literal dollar signs before a URL is passed to Retrofit's code
+/// generator. Retrofit evaluates annotation constants and writes their values
+/// into ordinary Dart string literals, where an unencoded `$` would become
+/// unintended interpolation in the generated `.g.dart` file.
+String encodeRetrofitUrlLiteral(String value) => value.replaceAll(r'$', '%24');

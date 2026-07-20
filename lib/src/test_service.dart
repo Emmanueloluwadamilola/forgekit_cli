@@ -68,6 +68,15 @@ Future<int> addModelTest({
   String? feature,
   bool force = false,
 }) async {
+  final config = loadForgeKitConfig(root: root);
+  if (config.architecture != 'clean') {
+    logger.err(
+      'forgekit add test model currently supports the clean architecture '
+      'profile. This project uses ${config.architecture}.',
+    );
+    return 1;
+  }
+
   final projectName = detectProjectName(root: root);
   final modelSnake = snakeCase(name);
   final modelPascal = pascalCase(modelSnake);
@@ -108,6 +117,15 @@ Future<int> addFunctionTest({
   required Directory root,
   bool force = false,
 }) async {
+  final config = loadForgeKitConfig(root: root);
+  if (config.architecture != 'clean') {
+    logger.err(
+      'forgekit add test function currently supports the clean architecture '
+      'profile. This project uses ${config.architecture}.',
+    );
+    return 1;
+  }
+
   final projectName = detectProjectName(root: root);
   final featureSnake = snakeCase(feature);
   final functionSnake = snakeCase(functionName);
@@ -220,6 +238,18 @@ void main() {
       expect(state.errorMessage, 'Something went wrong');
       expect(state.hasError, isTrue);
     });
+
+    test('copyWith preserves values when no replacement is provided', () {
+      const original = ${featurePascal}State(
+        status: $statusType.error,
+        errorMessage: 'Existing error',
+      );
+
+      final copy = original.copyWith();
+
+      expect(copy.status, original.status);
+      expect(copy.errorMessage, original.errorMessage);
+    });
   });
 }
 ''';
@@ -288,6 +318,19 @@ void main() {
 
       expect(provider.state.status, ViewStatus.idle);
       expect(provider.state.errorMessage, isNull);
+    });
+
+    test('does not notify listeners after disposal', () {
+      final provider = ${featurePascal}Provider();
+      var notifications = 0;
+      provider.addListener(() => notifications++);
+
+      provider.notifyListeners();
+      expect(notifications, 1);
+
+      provider.dispose();
+      provider.notifyListeners();
+      expect(notifications, 1);
     });
   });
 }

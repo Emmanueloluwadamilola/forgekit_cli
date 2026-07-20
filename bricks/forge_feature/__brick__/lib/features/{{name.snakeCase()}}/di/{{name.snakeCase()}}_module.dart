@@ -9,9 +9,9 @@ import 'package:{{projectName}}/features/{{name.snakeCase()}}/data/remote/servic
 /// (`{{name.pascalCase()}}RepositoryImpl` -> `{{name.pascalCase()}}Repository`) is declared
 /// on the impl via `@LazySingleton(as: {{name.pascalCase()}}Repository)`.
 {{#useRouter}}
-// NOTE: after running build_runner, register the screen route in
-// core/presentation/app/app.dart:
-//   {{name.pascalCase()}}Screen.id: (_) => const {{name.pascalCase()}}Screen(),
+// The ForgeKit CLI registers this feature's named route automatically.
+// Direct Mason rendering bypasses that orchestration and must integrate the
+// generated screen into the application router separately.
 {{/useRouter}}
 @module
 abstract class {{name.pascalCase()}}Module {

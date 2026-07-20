@@ -33,7 +33,7 @@ void main() {
     );
 
     expect(result, 0);
-    expect(_dependency(root, 'shared_preferences'), '^2.5.3');
+    expect(_dependency(root, 'shared_preferences'), '^2.5.5');
 
     final service = _read(
       root,
@@ -41,10 +41,11 @@ void main() {
     );
     expect(service, contains('@lazySingleton'));
     expect(service, contains('class LocalStorageService'));
-    expect(service, contains('SharedPreferences.getInstance()'));
-    expect(service, contains('Future<bool> setString'));
-    expect(service, contains('List<String>? getStringList'));
-    expect(service, contains('Future<bool> clear()'));
+    expect(service, contains('SharedPreferencesAsync'));
+    expect(service, isNot(contains('SharedPreferences.getInstance()')));
+    expect(service, contains('Future<void> setString'));
+    expect(service, contains('Future<List<String>?> getStringList'));
+    expect(service, contains('Future<void> clear({Set<String>? allowList})'));
 
     final main = _read(root, 'lib/main.dart');
     expect(
@@ -73,7 +74,7 @@ void main() {
       root,
       architecture: 'mvvm',
       mainSource: _getItMain('config'),
-      extraDependency: 'flutter_secure_storage: ^9.2.4',
+      extraDependency: 'flutter_secure_storage: ^10.3.1',
     );
 
     final result = await addStorageService(
@@ -86,7 +87,7 @@ void main() {
     );
 
     expect(result, 0);
-    expect(_dependency(root, 'flutter_secure_storage'), '^9.2.4');
+    expect(_dependency(root, 'flutter_secure_storage'), '^10.3.1');
 
     final service = _read(
       root,
@@ -168,6 +169,32 @@ void main() {
       'lib/app/app_module.dart',
       'lib/main.dart',
     ]);
+  });
+
+  test('rejects an existing dependency that excludes the secure baseline',
+      () async {
+    _writeProject(
+      root,
+      architecture: 'clean',
+      mainSource: _getItMain('core'),
+      extraDependency: 'flutter_secure_storage: ^9.2.4',
+    );
+
+    final result = await addStorageService(
+      name: 'secure_storage',
+      driver: 'flutter_secure_storage',
+      root: root,
+      logger: logger,
+      runBuildRunner: false,
+      runPackageCommands: false,
+    );
+
+    expect(result, 1);
+    expect(
+      File(p.join(root.path, 'lib', 'services', 'secure_storage_service.dart'))
+          .existsSync(),
+      isFalse,
+    );
   });
 
   test('does not overwrite an existing service', () async {

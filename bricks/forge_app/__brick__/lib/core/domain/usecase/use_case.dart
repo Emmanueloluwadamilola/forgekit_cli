@@ -2,10 +2,10 @@ import '../api/api_result.dart';
 
 /// Base contract for a single application use case.
 ///
-/// [Type] is the success payload type, [Params] the input type
+/// [Output] is the success payload type, [Params] the input type
 /// (use [NoParams] when no input is required).
-abstract class UseCase<Type, Params> {
-  Future<ApiResult<Type>> call(Params params);
+abstract class UseCase<Output, Params> {
+  Future<ApiResult<Output>> call(Params params);
 }
 
 class NoParams {

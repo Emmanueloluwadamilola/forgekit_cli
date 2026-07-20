@@ -18,10 +18,19 @@ class RegistryConfig {
         'path': path,
       };
 
-  static RegistryConfig fromJson(Map<String, dynamic> json) {
+  static RegistryConfig? tryFromJson(Map<String, dynamic> json) {
+    final url = json['url'];
+    final path = json['path'];
+    if (url is! String ||
+        path is! String ||
+        path.trim().isEmpty ||
+        !p.isAbsolute(path) ||
+        validateRegistryRemote(url) != null) {
+      return null;
+    }
     return RegistryConfig(
-      url: json['url'] as String,
-      path: json['path'] as String,
+      url: url,
+      path: p.normalize(path),
     );
   }
 }
@@ -31,6 +40,12 @@ Future<int> connectRegistry({
   required Logger logger,
   String? path,
 }) async {
+  final normalizedUrl = url.trim();
+  final validationError = validateRegistryRemote(normalizedUrl);
+  if (validationError != null) {
+    logger.err(validationError);
+    return 1;
+  }
   final registryPath = path == null || path.trim().isEmpty
       ? p.join(_forgekitHome().path, 'registry')
       : p.normalize(p.absolute(path));
@@ -43,11 +58,23 @@ Future<int> connectRegistry({
       );
       return 1;
     }
+    final remote = await Process.run(
+      'git',
+      ['-C', registryPath, 'remote', 'get-url', 'origin'],
+    );
+    if (remote.exitCode != 0 ||
+        remote.stdout.toString().trim() != normalizedUrl) {
+      logger.err(
+        'Registry path is connected to a different or unreadable origin. '
+        'Use a new --path or pass its exact existing origin URL.',
+      );
+      return 1;
+    }
     final pullExit = await pullRegistry(logger: logger, path: registryPath);
     if (pullExit != 0) return pullExit;
   } else {
     final cloneExit = await _runGit(
-      ['clone', url, registryPath],
+      ['clone', normalizedUrl, registryPath],
       logger: logger,
       failureMessage: 'Failed to clone registry.',
     );
@@ -55,7 +82,7 @@ Future<int> connectRegistry({
   }
 
   await _writeRegistryConfig(
-    RegistryConfig(url: url, path: registryPath),
+    RegistryConfig(url: normalizedUrl, path: registryPath),
   );
 
   logger.success('Connected Flutter ForgeKit CLI registry.');
@@ -144,7 +171,7 @@ Future<int> registryStatus({required Logger logger}) async {
   }
 
   logger
-    ..info('Registry URL: ${config.url}')
+    ..info('Registry URL: ${safeRegistryRemoteForDisplay(config.url)}')
     ..info('Registry path: ${config.path}');
 
   return _runGit(
@@ -154,25 +181,85 @@ Future<int> registryStatus({required Logger logger}) async {
   );
 }
 
+/// Validates a registry remote without performing network access.
+///
+/// HTTPS and SSH remotes are accepted, as are local paths and `file:` URLs.
+/// Credential-bearing URLs, URL query strings, and plaintext network
+/// transports are rejected so secrets are not written to registry.json.
+String? validateRegistryRemote(String remote) {
+  if (remote.trim().isEmpty) {
+    return 'A registry Git URL or local path is required.';
+  }
+  if (RegExp(r'^[^@\s]+@[^:\s]+:.+$').hasMatch(remote)) return null;
+  if (RegExp(r'^[A-Za-z]:[\\/]').hasMatch(remote) || remote.startsWith(r'\\')) {
+    return null;
+  }
+
+  final uri = Uri.tryParse(remote);
+  if (uri == null) return 'Registry remote is not a valid URL or local path.';
+  if (uri.scheme.isEmpty) return null;
+  if (uri.query.isNotEmpty || uri.fragment.isNotEmpty) {
+    return 'Registry URLs must not contain query strings or fragments because '
+        'they can expose credentials in local configuration and process logs.';
+  }
+  switch (uri.scheme.toLowerCase()) {
+    case 'https':
+      if (uri.host.isEmpty) return 'HTTPS registry URL must include a host.';
+      if (uri.userInfo.isNotEmpty) {
+        return 'Registry URLs must not embed usernames, passwords, or tokens. '
+            'Use the Git credential manager or SSH agent.';
+      }
+      return null;
+    case 'ssh':
+      if (uri.host.isEmpty) return 'SSH registry URL must include a host.';
+      if (uri.userInfo.contains(':')) {
+        return 'SSH registry URLs must not embed passwords. Use an SSH agent.';
+      }
+      return null;
+    case 'file':
+      return null;
+    default:
+      return 'Registry transport "${uri.scheme}" is not allowed. Use HTTPS, '
+          'SSH, or a local path; plaintext HTTP and git:// are rejected.';
+  }
+}
+
+String safeRegistryRemoteForDisplay(String remote) {
+  return validateRegistryRemote(remote) == null
+      ? remote
+      : '<redacted insecure or credential-bearing remote>';
+}
+
 Future<RegistryConfig?> readRegistryConfig() async {
   final file = _registryConfigFile();
   if (!file.existsSync()) return null;
 
-  final decoded = json.decode(await file.readAsString());
-  if (decoded is! Map<String, dynamic>) return null;
-  return RegistryConfig.fromJson(decoded);
+  try {
+    final decoded = json.decode(await file.readAsString());
+    if (decoded is! Map<String, dynamic>) return null;
+    return RegistryConfig.tryFromJson(decoded);
+  } on FormatException {
+    return null;
+  } on FileSystemException {
+    return null;
+  }
 }
 
 Directory? registryWidgetsDirSync() {
   final file = _registryConfigFile();
   if (!file.existsSync()) return null;
 
-  final decoded = json.decode(file.readAsStringSync());
-  if (decoded is! Map<String, dynamic>) return null;
-  final config = RegistryConfig.fromJson(decoded);
-  if (!Directory(config.path).existsSync()) return null;
-  final dir = Directory(p.join(config.path, 'widgets'));
-  return dir;
+  try {
+    final decoded = json.decode(file.readAsStringSync());
+    if (decoded is! Map<String, dynamic>) return null;
+    final config = RegistryConfig.tryFromJson(decoded);
+    if (config == null || !Directory(config.path).existsSync()) return null;
+    return Directory(p.join(config.path, 'widgets'));
+  } on FormatException {
+    return null;
+  } on FileSystemException {
+    return null;
+  }
 }
 
 Future<void> _writeRegistryConfig(RegistryConfig config) async {
@@ -218,7 +305,6 @@ Future<int> _runGit(
       'git',
       args,
       mode: ProcessStartMode.inheritStdio,
-      runInShell: true,
     );
     final exitCode = await process.exitCode;
     if (exitCode != 0) logger.err(failureMessage);

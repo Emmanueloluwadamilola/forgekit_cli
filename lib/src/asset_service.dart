@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 
 /// Adds an asset — a single file **or a whole folder** — to the project:
@@ -20,12 +21,19 @@ Future<int> addAsset({
   String? dir,
   bool recursive = false,
 }) async {
+  String? normalizedDir;
+  try {
+    normalizedDir = dir == null ? null : _normalizeAssetSubdirectory(dir);
+  } on _AssetException catch (error) {
+    logger.err(error.message);
+    return 1;
+  }
   if (FileSystemEntity.isDirectorySync(sourcePath)) {
     return _addAssetFolder(
       Directory(sourcePath),
       logger: logger,
       root: root,
-      dir: dir,
+      dir: normalizedDir,
       recursive: recursive,
     );
   }
@@ -33,7 +41,12 @@ Future<int> addAsset({
     logger.err('Source not found: $sourcePath');
     return 1;
   }
-  return _addAssetFile(File(sourcePath), logger: logger, root: root, dir: dir);
+  return _addAssetFile(
+    File(sourcePath),
+    logger: logger,
+    root: root,
+    dir: normalizedDir,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +62,12 @@ Future<int> _addAssetFile(
   final fileName = p.basename(src.path);
   final sub = dir ?? _defaultSubdir(p.extension(fileName).toLowerCase());
   final assetPath = 'assets/$sub/$fileName';
-  final destAbs = p.join(root.path, 'assets', sub, fileName);
+  final assetsRoot = p.normalize(p.absolute(root.path, 'assets'));
+  final destAbs = p.normalize(p.join(assetsRoot, sub, fileName));
+  if (!p.isWithin(assetsRoot, destAbs)) {
+    logger.err('Asset destination escapes the project assets directory.');
+    return 1;
+  }
 
   final progress = logger.progress('Adding asset "$fileName"');
   final Drawables result;
@@ -130,8 +148,14 @@ Future<int> _addAssetFolder(
         assetPath = _posix(p.relative(f.path, from: root.absolute.path));
       } else {
         final relFromSrc = p.relative(f.path, from: srcDir.path);
-        final destRel = p.join('assets', sub, relFromSrc);
+        final destRel = p.normalize(p.join('assets', sub, relFromSrc));
         final destFile = File(p.join(root.path, destRel));
+        final assetsRoot = p.normalize(p.absolute(root.path, 'assets'));
+        if (!p.isWithin(assetsRoot, p.normalize(destFile.absolute.path))) {
+          throw const _AssetException(
+            'Asset destination escapes the project assets directory.',
+          );
+        }
         // Never overwrite what already exists — only copy when absent.
         if (destFile.existsSync()) {
           existedCount++;
@@ -194,6 +218,32 @@ List<File> _collectFiles(Directory dir, bool recursive) {
 
 String _posix(String path) => path.replaceAll(r'\', '/');
 
+String _normalizeAssetSubdirectory(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty ||
+      p.isAbsolute(trimmed) ||
+      p.posix.isAbsolute(trimmed) ||
+      p.windows.isAbsolute(trimmed)) {
+    throw const _AssetException(
+      '--dir must be a non-empty relative directory below assets/.',
+    );
+  }
+  final segments = trimmed.split(RegExp(r'[/\\]+'));
+  if (segments.any(
+    (segment) =>
+        segment.isEmpty ||
+        segment == '.' ||
+        segment == '..' ||
+        segment.contains(':') ||
+        segment.contains(RegExp(r'[\x00-\x1F]')),
+  )) {
+    throw const _AssetException(
+      '--dir must not contain traversal, drive, or control-character segments.',
+    );
+  }
+  return p.joinAll(segments);
+}
+
 String _defaultSubdir(String ext) {
   const images = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'};
   const anim = {'.json', '.lottie'};
@@ -242,14 +292,10 @@ Drawables _addDrawableConstants(
   List<({String name, String assetPath})> entries,
 ) {
   final file = File(
-    p.join(
+    p.joinAll([
       root.path,
-      'lib',
-      'core',
-      'presentation',
-      'resources',
-      'drawables.dart',
-    ),
+      ..._drawablePath(loadForgeKitConfig(root: root)),
+    ]),
   );
   final existingContent = file.existsSync() ? file.readAsStringSync() : null;
 
@@ -282,7 +328,10 @@ Drawables _addDrawableConstants(
   }
 
   final lines = toAdd
-      .map((e) => "  static const ${e.name} = '${e.assetPath}';")
+      .map(
+        (e) =>
+            "  static const ${e.name} = '${_escapeDartString(e.assetPath)}';",
+      )
       .join('\n');
 
   if (existingContent == null) {
@@ -308,6 +357,24 @@ $lines
   }
   return (added: toAdd.length, skipped: skipped, collisions: collisions);
 }
+
+List<String> _drawablePath(ForgeKitConfig config) =>
+    switch (config.architecture) {
+      'mvvm' => const ['lib', 'ui', 'core', 'resources', 'drawables.dart'],
+      'modular' => const ['lib', 'core', 'resources', 'drawables.dart'],
+      _ => const [
+          'lib',
+          'core',
+          'presentation',
+          'resources',
+          'drawables.dart',
+        ],
+    };
+
+String _escapeDartString(String value) => value
+    .replaceAll(r'\', r'\\')
+    .replaceAll("'", r"\'")
+    .replaceAll(r'$', r'\$');
 
 YamlNode? _tryParse(YamlEditor editor, List<Object?> path) {
   try {

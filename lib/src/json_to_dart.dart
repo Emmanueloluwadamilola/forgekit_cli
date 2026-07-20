@@ -4,6 +4,8 @@
 /// Shared by `forgekit add function` and `forgekit add model`.
 library;
 
+import 'dart:convert';
+
 /// How a field maps between JSON, the DTO, and the domain model.
 enum JsonFieldKind { primitive, object, primitiveList, objectList }
 
@@ -35,12 +37,111 @@ class JsonClass {
 
 /// Analyzes [map] into a list of classes ([base] first, nested classes too).
 List<JsonClass> analyzeJson(String base, Map<String, dynamic> map) {
+  if (!_isDartTypeName(base)) {
+    throw FormatException(
+      '"$base" cannot be emitted as a Dart class name. Use a name that starts '
+      'with a letter and contains only letters or digits.',
+    );
+  }
   final out = <JsonClass>[];
   _collect(base, map, out);
+  final classNames = <String>{};
+  for (final jsonClass in out) {
+    if (!classNames.add(jsonClass.name)) {
+      throw FormatException(
+        'JSON properties normalize to the duplicate Dart class name '
+        '"${jsonClass.name}".',
+      );
+    }
+  }
   return out;
 }
 
+/// Analyzes a non-empty, homogeneous top-level JSON object array.
+///
+/// A single sample cannot safely infer optional or polymorphic fields, so
+/// inconsistent records are rejected with guidance to use OpenAPI instead.
+List<JsonClass> analyzeJsonObjects(String base, List<dynamic> values) {
+  if (values.isEmpty || values.any((value) => value is! Map)) {
+    throw const FormatException(
+      'top-level JSON array must contain one or more objects',
+    );
+  }
+  final objects =
+      values.cast<Map>().map((value) => value.cast<String, dynamic>()).toList();
+  final first = objects.first;
+  for (final object in objects.skip(1)) {
+    _validateCompatibleObjectSamples(first, object, path: r'$');
+  }
+  return analyzeJson(base, first);
+}
+
+void _validateCompatibleObjectSamples(
+  Map<String, dynamic> expected,
+  Map<String, dynamic> actual, {
+  required String path,
+}) {
+  if (expected.keys.toSet().length != actual.keys.toSet().length ||
+      !actual.keys.toSet().containsAll(expected.keys)) {
+    throw FormatException(
+      'objects at $path have different fields; use an OpenAPI schema for '
+      'optional or polymorphic data',
+    );
+  }
+  for (final key in expected.keys) {
+    final first = expected[key];
+    final next = actual[key];
+    if (first is Map && next is Map) {
+      _validateCompatibleObjectSamples(
+        first.cast<String, dynamic>(),
+        next.cast<String, dynamic>(),
+        path: '$path.$key',
+      );
+      continue;
+    }
+    final firstType = _sampleType(first);
+    final nextType = _sampleType(next);
+    final bothNumbers = const {'int', 'double'}.contains(firstType) &&
+        const {'int', 'double'}.contains(nextType);
+    if (firstType != nextType && !bothNumbers) {
+      throw FormatException(
+        'values at $path.$key have incompatible sample types '
+        '($firstType and $nextType)',
+      );
+    }
+  }
+}
+
+String _sampleType(Object? value) => switch (value) {
+      null => 'null',
+      bool() => 'bool',
+      int() => 'int',
+      double() => 'double',
+      String() => 'String',
+      Map() => 'object',
+      List() => 'array',
+      _ => value.runtimeType.toString(),
+    };
+
 void _collect(String base, Map<String, dynamic> map, List<JsonClass> out) {
+  final fieldNames = <String, String>{};
+  for (final key in map.keys) {
+    final name = _safeIdentifier(camelCase(key));
+    if (name.isEmpty) {
+      throw FormatException(
+        'JSON key ${jsonEncode(key)} does not contain characters that can form '
+        'a Dart identifier.',
+      );
+    }
+    final previous = fieldNames[name];
+    if (previous != null) {
+      throw FormatException(
+        'JSON keys ${jsonEncode(previous)} and ${jsonEncode(key)} both '
+        'normalize to the Dart field "$name".',
+      );
+    }
+    fieldNames[name] = key;
+  }
   final fields = <JsonField>[];
   map.forEach((key, value) {
     fields.add(_fieldFor(base, key, value, out));
@@ -54,7 +155,7 @@ JsonField _fieldFor(
   dynamic value,
   List<JsonClass> out,
 ) {
-  final name = camelCase(key);
+  final name = _safeIdentifier(camelCase(key));
   JsonField prim(String type) => JsonField(
         jsonKey: key,
         dartName: name,
@@ -93,6 +194,23 @@ JsonField _fieldFor(
     }
     final elem = value.first;
     if (elem is Map) {
+      if (value.any((item) => item is! Map)) {
+        throw FormatException(
+          'JSON array ${jsonEncode(key)} mixes objects with other value types. '
+          'Use a homogeneous sample array.',
+        );
+      }
+      final expectedKeys = elem.keys.map((item) => item.toString()).toSet();
+      for (final item in value.skip(1).cast<Map>()) {
+        final keys = item.keys.map((entry) => entry.toString()).toSet();
+        if (keys.length != expectedKeys.length ||
+            !keys.containsAll(expectedKeys)) {
+          throw FormatException(
+            'Objects in JSON array ${jsonEncode(key)} have different fields. '
+            'Use an OpenAPI schema when fields are optional or polymorphic.',
+          );
+        }
+      }
       final nested = base + pascalCase(singular(key));
       _collect(nested, elem.cast<String, dynamic>(), out);
       return JsonField(
@@ -103,15 +221,7 @@ JsonField _fieldFor(
         dtoType: 'List<${nested}Dto>',
       );
     }
-    final et = elem is bool
-        ? 'bool'
-        : elem is int
-            ? 'int'
-            : elem is double
-                ? 'double'
-                : elem is String
-                    ? 'String'
-                    : 'dynamic';
+    final et = _listElementType(key, value);
     return JsonField(
       jsonKey: key,
       dartName: name,
@@ -121,6 +231,32 @@ JsonField _fieldFor(
     );
   }
   return prim('dynamic');
+}
+
+String _listElementType(String key, List<dynamic> values) {
+  final types = <String>{};
+  for (final value in values) {
+    final type = switch (value) {
+      bool() => 'bool',
+      int() => 'int',
+      double() => 'double',
+      String() => 'String',
+      _ => null,
+    };
+    if (type == null) {
+      throw FormatException(
+        'JSON array ${jsonEncode(key)} contains null, nested arrays, or '
+        'unsupported mixed values. Use a homogeneous primitive array.',
+      );
+    }
+    types.add(type);
+  }
+  if (types.length == 1) return types.single;
+  if (types.difference(const {'int', 'double'}).isEmpty) return 'num';
+  throw FormatException(
+    'JSON array ${jsonEncode(key)} mixes incompatible primitive types: '
+    '${types.join(', ')}.',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -220,7 +356,9 @@ String emitDto(
     b.writeln('@JsonSerializable(explicitToJson: true)');
     b.writeln('class ${c.name}Dto {');
     for (final f in c.fields) {
-      if (f.needsKey) b.writeln("  @JsonKey(name: '${f.jsonKey}')");
+      if (f.needsKey) {
+        b.writeln('  @JsonKey(name: ${_dartStringLiteral(f.jsonKey)})');
+      }
       b.writeln('  final ${f.dtoType} ${f.dartName};');
     }
     if (c.fields.isNotEmpty) b.writeln();
@@ -271,8 +409,88 @@ String camelCase(String input) {
   if (pascal.isEmpty) return pascal;
   final camel = pascal[0].toLowerCase() + pascal.substring(1);
   if (RegExp(r'^[0-9]').hasMatch(camel)) return 'n$pascal';
-  return camel;
+  return _safeIdentifier(camel);
 }
+
+bool _isDartTypeName(String value) =>
+    RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(value) &&
+    !_dartKeywords.contains(value);
+
+String _safeIdentifier(String value) =>
+    _dartKeywords.contains(value) ? '${value}Value' : value;
+
+String _dartStringLiteral(String value) =>
+    jsonEncode(value).replaceAll(r'$', r'\$');
+
+const _dartKeywords = {
+  'abstract',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'base',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'covariant',
+  'default',
+  'deferred',
+  'do',
+  'dynamic',
+  'else',
+  'enum',
+  'export',
+  'extends',
+  'extension',
+  'external',
+  'factory',
+  'false',
+  'final',
+  'finally',
+  'for',
+  'get',
+  'hide',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'interface',
+  'is',
+  'late',
+  'library',
+  'mixin',
+  'new',
+  'null',
+  'of',
+  'on',
+  'operator',
+  'part',
+  'required',
+  'rethrow',
+  'return',
+  'sealed',
+  'set',
+  'show',
+  'static',
+  'super',
+  'switch',
+  'sync',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'type',
+  'typedef',
+  'var',
+  'void',
+  'when',
+  'while',
+  'with',
+  'yield',
+};
 
 String singular(String key) {
   if (key.endsWith('ies') && key.length > 3) {

@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
+import 'route_wiring_service.dart';
 
 Future<int> renameFeature({
   required Directory root,
@@ -11,6 +13,14 @@ Future<int> renameFeature({
   required String to,
   required Logger logger,
 }) async {
+  final config = loadForgeKitConfig(root: root);
+  if (config.architecture != 'clean') {
+    logger.err(
+      'forgekit rename feature currently supports the clean architecture '
+      'profile. This project uses ${config.architecture}.',
+    );
+    return 1;
+  }
   final fromSnake = snakeCase(from);
   final toSnake = snakeCase(to);
 
@@ -80,6 +90,14 @@ Future<int> removeFeature({
   required Logger logger,
   required bool force,
 }) async {
+  final config = loadForgeKitConfig(root: root);
+  if (config.architecture != 'clean') {
+    logger.err(
+      'forgekit remove feature currently supports the clean architecture '
+      'profile. This project uses ${config.architecture}.',
+    );
+    return 1;
+  }
   final featureSnake = snakeCase(feature);
   if (featureSnake.isEmpty) {
     logger.err('A feature name is required.');
@@ -117,16 +135,25 @@ Future<int> removeFeature({
 
   final progress = logger.progress('Removing feature "$featureSnake"');
   try {
+    unregisterFeatureRoutes(
+      root: root,
+      config: config,
+      feature: featureSnake,
+    );
     if (featureDir.existsSync()) await featureDir.delete(recursive: true);
     if (testDir.existsSync()) await testDir.delete(recursive: true);
   } on FileSystemException catch (e) {
     progress.fail('Failed to remove feature.');
     logger.err(e.message);
     return 1;
+  } on RouteWiringException catch (e) {
+    progress.fail('Failed to remove feature route registrations.');
+    logger.err(e.message);
+    return 1;
   }
 
   progress.complete('Removed feature "$featureSnake".');
-  logger.info('Review route registrations and dependency references manually.');
+  logger.info('Removed ForgeKit-owned route registrations for this feature.');
   return 0;
 }
 

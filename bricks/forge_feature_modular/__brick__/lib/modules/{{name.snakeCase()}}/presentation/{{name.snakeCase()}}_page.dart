@@ -24,7 +24,7 @@ import 'package:{{projectName}}/modules/{{name.snakeCase()}}/presentation/{{name
 {{#useProvider}}    return ChangeNotifierProvider(
       create: (_) => {{name.pascalCase()}}Controller(),
       child: Consumer<{{name.pascalCase()}}Controller>(
-        builder: (_, controller, __) =>
+        builder: (_, controller, _) =>
             _{{name.pascalCase()}}View(state: controller.state),
       ),
     );

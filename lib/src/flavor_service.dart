@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 
 /// Scaffolds Dart-side build flavors: a `FlavorConfig` (enum + per-flavor
@@ -23,12 +24,30 @@ Future<int> addFlavors({
     );
     return 1;
   }
-
-  final configFile = File(
-    p.join(root.path, 'lib', 'core', 'config', 'flavor_config.dart'),
+  final invalidNames = names.where(
+    (name) =>
+        !RegExp(r'^[a-z][A-Za-z0-9]*$').hasMatch(name) ||
+        _dartKeywords.contains(name),
   );
+  if (invalidNames.isNotEmpty) {
+    logger.err(
+      'Flavor names must normalize to valid, non-keyword Dart enum values. '
+      'Invalid: ${invalidNames.toSet().join(', ')}.',
+    );
+    return 1;
+  }
+  if (names.toSet().length != names.length) {
+    logger.err('Flavor names must be unique after normalization.');
+    return 1;
+  }
+
+  final config = loadForgeKitConfig(root: root);
+  final configSegments = _configPath(config, 'flavor_config.dart');
+  final configFile = File(p.joinAll([root.path, ...configSegments]));
   if (configFile.existsSync()) {
-    logger.err('lib/core/config/flavor_config.dart already exists.');
+    logger.err(
+      '${p.joinAll(configSegments)} already exists.',
+    );
     return 1;
   }
 
@@ -41,7 +60,9 @@ Future<int> addFlavors({
 
   for (final name in names) {
     final entry = File(p.join(root.path, 'lib', 'main_$name.dart'));
-    entry.writeAsStringSync(_entrypoint(name));
+    entry.writeAsStringSync(
+      _entrypoint(name, p.posix.joinAll(configSegments.skip(1))),
+    );
     written.add(entry.path);
   }
 
@@ -83,18 +104,18 @@ String _flavorConfig(List<String> names) {
     b
       ..writeln('      case Flavor.$name:')
       ..writeln("        name = '$name';")
-      ..writeln("        apiBaseUrl = 'https://$name.api.example.com';")
-      ..writeln('    }');
+      ..writeln("        apiBaseUrl = 'https://$name.api.example.com';");
   }
   b
+    ..writeln('    }')
     ..writeln('  }')
     ..writeln('}');
   return b.toString();
 }
 
-String _entrypoint(String name) {
+String _entrypoint(String name, String configImport) {
   return '''
-import 'core/config/flavor_config.dart';
+import '$configImport';
 import 'main.dart' as app;
 
 /// Entrypoint for the "$name" flavor. Run with:
@@ -105,3 +126,79 @@ void main() {
 }
 ''';
 }
+
+List<String> _configPath(ForgeKitConfig config, String fileName) =>
+    switch (config.architecture) {
+      'mvvm' => ['lib', 'config', fileName],
+      _ => ['lib', 'core', 'config', fileName],
+    };
+
+const _dartKeywords = <String>{
+  'abstract',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'base',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'covariant',
+  'default',
+  'deferred',
+  'do',
+  'dynamic',
+  'else',
+  'enum',
+  'export',
+  'extends',
+  'extension',
+  'external',
+  'factory',
+  'false',
+  'final',
+  'finally',
+  'for',
+  'Function',
+  'get',
+  'hide',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'interface',
+  'is',
+  'late',
+  'library',
+  'mixin',
+  'new',
+  'null',
+  'of',
+  'on',
+  'operator',
+  'part',
+  'required',
+  'rethrow',
+  'return',
+  'sealed',
+  'set',
+  'show',
+  'static',
+  'super',
+  'switch',
+  'sync',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typedef',
+  'var',
+  'void',
+  'when',
+  'while',
+  'with',
+  'yield',
+};

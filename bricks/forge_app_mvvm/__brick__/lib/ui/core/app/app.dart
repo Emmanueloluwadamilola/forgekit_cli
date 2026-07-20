@@ -10,6 +10,7 @@ import '../../../config/di/dependencies.dart';
 {{/useCubit}}
 import '../themes/app_theme.dart';
 import '../view_models/theme_view_model.dart';
+// forgekit:route-imports
 
 {{#useProvider}}class App extends StatelessWidget {
   const App({super.key});
@@ -17,7 +18,7 @@ import '../view_models/theme_view_model.dart';
   Widget build(BuildContext context) => ChangeNotifierProvider(
         create: (_) => getIt<ThemeViewModel>(),
         child: Consumer<ThemeViewModel>(
-          builder: (_, vm, __) => _AppView(themeMode: vm.mode),
+          builder: (_, vm, _) => _AppView(themeMode: vm.mode),
         ),
       );
 }
@@ -53,7 +54,10 @@ class _AppView extends StatelessWidget {
   const _AppView({required this.themeMode});
   final ThemeMode themeMode;
 {{^useRouter}}  static final _router = GoRouter(
-    routes: [GoRoute(path: '/', builder: (_, __) => const _HomeView())],
+    routes: [
+      GoRoute(path: '/', builder: (_, _) => const _HomeView()),
+      // forgekit:go-routes
+    ],
   );
 {{/useRouter}}
   @override
@@ -63,7 +67,10 @@ class _AppView extends StatelessWidget {
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: themeMode,
-      routes: {'/': (_) => const _HomeView()},
+      routes: {
+        '/': (_) => const _HomeView(),
+        // forgekit:named-routes
+      },
     );
 {{/useRouter}}{{^useRouter}}    return MaterialApp.router(
       title: 'Flutter ForgeKit CLI MVVM',

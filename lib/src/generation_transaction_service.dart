@@ -113,7 +113,6 @@ Future<void> _formatChangedDartFiles(
       'dart',
       ['format', ...paths],
       workingDirectory: root.path,
-      runInShell: true,
     );
     if (result.exitCode != 0) {
       throw GenerationTransactionException(
@@ -305,8 +304,18 @@ Future<Map<String, _FileSnapshot>> _snapshotProject(Directory root) async {
 }
 
 bool _ignored(String relativePath) {
-  final first = p.split(relativePath).first;
-  return const {'.git', '.dart_tool', '.forgekit', 'build'}.contains(first);
+  const ignoredSegments = {
+    '.git',
+    '.dart_tool',
+    '.forgekit',
+    '.gradle',
+    '.symlinks',
+    'build',
+    'coverage',
+    'DerivedData',
+    'Pods',
+  };
+  return p.split(relativePath).any(ignoredSegments.contains);
 }
 
 List<GenerationChange> _compareSnapshots(
@@ -431,6 +440,31 @@ Future<void> _recordTransaction({
   }
   manifest['generatedFiles'] = generatedFiles;
   await _writeJsonAtomic(manifestFile, manifest);
+  await _pruneTransactionBackups(root, preserve: id);
+}
+
+Future<void> _pruneTransactionBackups(
+  Directory root, {
+  required String preserve,
+  int keep = 20,
+}) async {
+  final backups = Directory(p.join(root.path, '.forgekit', 'backups'));
+  if (!backups.existsSync()) return;
+  final directories = await backups
+      .list(followLinks: false)
+      .where((entity) => entity is Directory)
+      .cast<Directory>()
+      .toList();
+  directories.sort((first, second) => second.path.compareTo(first.path));
+
+  var retained = 0;
+  for (final directory in directories) {
+    if (p.basename(directory.path) == preserve || retained < keep) {
+      retained++;
+      continue;
+    }
+    await directory.delete(recursive: true);
+  }
 }
 
 Future<Map<String, dynamic>?> _loadLatestTransaction(Directory root) async {
@@ -497,15 +531,32 @@ Future<void> _writeJsonAtomic(File file, Map<String, Object?> value) async {
   final contents = '${const JsonEncoder.withIndent('  ').convert(value)}\n';
   final temporary = File('${file.path}.tmp');
   await temporary.writeAsString(contents, flush: true);
-  if (file.existsSync()) await file.delete();
-  await temporary.rename(file.path);
+  await _replaceFile(temporary, file);
 }
 
 Future<void> _atomicWriteBytes(File file, List<int> bytes) async {
   final temporary = File('${file.path}.forgekit-tmp');
   await temporary.writeAsBytes(bytes, flush: true);
-  if (file.existsSync()) await file.delete();
-  await temporary.rename(file.path);
+  await _replaceFile(temporary, file);
+}
+
+Future<void> _replaceFile(File temporary, File destination) async {
+  if (!destination.existsSync() || !Platform.isWindows) {
+    await temporary.rename(destination.path);
+    return;
+  }
+  final backup = File('${destination.path}.forgekit-backup');
+  if (backup.existsSync()) await backup.delete();
+  await destination.rename(backup.path);
+  try {
+    await temporary.rename(destination.path);
+    await backup.delete();
+  } catch (_) {
+    if (!destination.existsSync() && backup.existsSync()) {
+      await backup.rename(destination.path);
+    }
+    rethrow;
+  }
 }
 
 String _hash(List<int> bytes) => sha256.convert(bytes).toString();

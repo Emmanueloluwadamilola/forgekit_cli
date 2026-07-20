@@ -10,8 +10,10 @@ import '../env_service.dart';
 import '../flavor_service.dart';
 import '../font_service.dart';
 import '../function_service.dart';
+import '../generic_service.dart';
 import '../i18n_service.dart';
 import '../model_service.dart';
+import '../route_wiring_service.dart';
 import '../screen_service.dart';
 import '../storage_service.dart';
 import '../test_service.dart';
@@ -110,6 +112,14 @@ class _AddFeatureCommand extends Command<int> {
       );
       return 1;
     }
+    if (requestedRouter != null && requestedRouter != config.router) {
+      _logger.err(
+        'This project uses router "${config.router}". A feature cannot use '
+        'the incompatible router "$requestedRouter". Update forgekit.yaml '
+        'and the application router together before changing route styles.',
+      );
+      return 1;
+    }
     final router = requestedRouter ?? config.router;
     final stateManagement = config.stateManagement;
     // The brick's `useRouter` var means "this project uses named routes" — true
@@ -175,6 +185,19 @@ class _AddFeatureCommand extends Command<int> {
           'Expected the marker `// forgekit:modules` in '
           'lib/app/app_module.dart.',
         );
+        return 1;
+      }
+    } else {
+      try {
+        registerFeatureRoute(
+          root: root,
+          config: config.copyWith(router: router),
+          projectName: projectName,
+          feature: name,
+        );
+      } on RouteWiringException catch (error) {
+        progress.fail('Generated feature, but could not register its route.');
+        _logger.err(error.message);
         return 1;
       }
     }
@@ -270,6 +293,16 @@ class _AddWidgetCommand extends Command<int> {
       }
     }
 
+    final config = loadForgeKitConfig(root: root);
+    if (config.architecture != 'clean') {
+      _logger.err(
+        'Starter widget generation currently supports the clean architecture '
+        'profile. This project uses ${config.architecture}. Sync a widget '
+        'explicitly or add architecture-specific widget support first.',
+      );
+      return 1;
+    }
+
     final projectName = detectProjectName();
     final progress = _logger.progress('Adding widget "$name"');
 
@@ -302,12 +335,13 @@ class _AddServiceCommand extends Command<int> {
     argParser
       ..addOption(
         'driver',
-        allowed: storageServiceDrivers,
-        help: 'Generate a complete storage service using this driver.',
+        allowed: ['generic', ...storageServiceDrivers],
+        help: 'Service implementation. Omit in a terminal to choose '
+            'interactively.',
       )
       ..addFlag(
         'build-runner',
-        help: 'Override the forgekit.yaml build_runner setting for a driver.',
+        help: 'Override the forgekit.yaml build_runner setting.',
       );
   }
 
@@ -322,7 +356,7 @@ class _AddServiceCommand extends Command<int> {
 
   @override
   String get invocation => 'forgekit add service <name> '
-      '[--driver shared_preferences|flutter_secure_storage] '
+      '[--driver generic|shared_preferences|flutter_secure_storage] '
       '[--no-build-runner]';
 
   @override
@@ -341,12 +375,25 @@ class _AddServiceCommand extends Command<int> {
     }
 
     final name = rest.first;
-    final driver = argResults!['driver'] as String?;
-    if (driver != null) {
-      final config = loadForgeKitConfig(root: root);
-      final runBuildRunner = argResults!.wasParsed('build-runner')
-          ? argResults!['build-runner'] as bool
-          : config.runBuildRunner;
+    final requestedDriver = argResults!['driver'] as String?;
+    final driver = requestedDriver ??
+        (stdin.hasTerminal && stdout.hasTerminal
+            ? _logger.chooseOne(
+                'Select service type:',
+                choices: const [
+                  'generic',
+                  'shared_preferences',
+                  'flutter_secure_storage',
+                ],
+                defaultValue: 'generic',
+              )
+            : 'generic') ??
+        'generic';
+    final config = loadForgeKitConfig(root: root);
+    final runBuildRunner = argResults!.wasParsed('build-runner')
+        ? argResults!['build-runner'] as bool
+        : config.runBuildRunner;
+    if (driver != 'generic') {
       return addStorageService(
         name: name,
         driver: driver,
@@ -355,36 +402,12 @@ class _AddServiceCommand extends Command<int> {
         runBuildRunner: runBuildRunner,
       );
     }
-
-    if (argResults!.wasParsed('build-runner')) {
-      _logger.err('--build-runner is only available with --driver.');
-      return 1;
-    }
-
-    final projectName = detectProjectName(root: root);
-    final progress = _logger.progress('Adding service "$name"');
-
-    final exitCode = await runMason(
-      [
-        'make',
-        'forge_service',
-        '--name',
-        name,
-        '--projectName',
-        projectName,
-        '-o',
-        '.',
-      ],
+    return addGenericService(
+      name: name,
+      root: root,
       logger: _logger,
-      workingDirectory: root.path,
+      runBuildRunner: runBuildRunner,
     );
-
-    if (exitCode != 0) {
-      progress.fail('Failed to add service "$name".');
-      return 1;
-    }
-    progress.complete('Added service "$name".');
-    return 0;
   }
 }
 
@@ -963,14 +986,36 @@ class _AddUsecaseCommand extends Command<int> {
       return 1;
     }
 
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+    final config = loadForgeKitConfig(root: root);
+    if (config.architecture != 'clean') {
+      _logger.err(
+        'forgekit add usecase currently supports the clean architecture '
+        'profile. This project uses ${config.architecture}.',
+      );
+      return 1;
+    }
+
     final feature = _snakeCase(rest[0]);
     final rawName = rest[1];
     final name = _snakeCase(rawName);
     final className = '${_pascalCase(rawName)}Usecase';
-    final projectName = detectProjectName();
+    if (feature.isEmpty ||
+        name.isEmpty ||
+        !RegExp(r'^[A-Za-z][A-Za-z0-9]*Usecase$').hasMatch(className)) {
+      _logger.err(
+        'Feature and use-case names must generate valid Dart identifiers.',
+      );
+      return 1;
+    }
+    final projectName = detectProjectName(root: root);
 
     final dir = Directory(
-      p.join('lib', 'features', feature, 'domain', 'usecase'),
+      p.join(root.path, 'lib', 'features', feature, 'domain', 'usecase'),
     );
     final filePath = p.join(dir.path, '${name}_usecase.dart');
     final file = File(filePath);
@@ -995,7 +1040,7 @@ class _AddUsecaseCommand extends Command<int> {
       return 1;
     }
 
-    progress.complete('Created $filePath');
+    progress.complete('Created ${p.relative(filePath, from: root.path)}');
     return 0;
   }
 }
@@ -1178,7 +1223,6 @@ Future<int> _runBuildRunner(Logger logger, {String? workingDirectory}) async {
       'dart',
       ['run', 'build_runner', 'build'],
       mode: ProcessStartMode.inheritStdio,
-      runInShell: true,
       workingDirectory: workingDirectory,
     );
     final exitCode = await process.exitCode;

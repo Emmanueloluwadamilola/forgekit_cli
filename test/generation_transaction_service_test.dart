@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:forgekit/src/command_runner.dart';
 import 'package:forgekit/src/generation_transaction_service.dart';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
@@ -172,5 +173,23 @@ void main() {
         throwsFormatException,
       );
     });
+  });
+
+  test('transaction command labels exclude arguments and option values', () {
+    final runner = ForgeCommandRunner(logger: Logger(level: Level.quiet));
+    final results = runner.parse([
+      'set',
+      'env',
+      'ACCESS_TOKEN',
+      'do-not-record-me',
+      '--environment',
+      'dev',
+    ]);
+
+    final label = transactionCommandLabel(results);
+
+    expect(label, 'forgekit set env');
+    expect(label, isNot(contains('ACCESS_TOKEN')));
+    expect(label, isNot(contains('do-not-record-me')));
   });
 }

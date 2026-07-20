@@ -116,6 +116,12 @@ class _SetEnvCommand extends Command<int> {
         'all',
         negatable: false,
         help: 'Apply the value to every environment JSON file.',
+      )
+      ..addFlag(
+        'allow-public-value',
+        negatable: false,
+        help: 'Allow a secret-like key only after confirming that its value '
+            'is designed to be public client configuration.',
       );
   }
 
@@ -129,7 +135,8 @@ class _SetEnvCommand extends Command<int> {
 
   @override
   String get invocation =>
-      'forgekit set env <KEY> <VALUE> --environment <name>';
+      'forgekit set env <KEY> <VALUE> --environment <name> '
+      '[--allow-public-value]';
 
   @override
   Future<int> run() async {
@@ -151,6 +158,7 @@ class _SetEnvCommand extends Command<int> {
       root: root,
       environment: argResults!['environment'] as String?,
       all: argResults!['all'] as bool,
+      allowPublicValue: argResults!['allow-public-value'] as bool,
     );
   }
 }

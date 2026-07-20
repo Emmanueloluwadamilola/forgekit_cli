@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'registry_service.dart';
 import 'utils.dart';
@@ -35,14 +36,15 @@ Future<int> syncWidget({
   final root = findProjectRoot();
   final sourceFile = sourcePath == null
       ? File(
-          p.join(
+          p.joinAll([
             root?.path ?? Directory.current.path,
-            'lib',
-            'core',
-            'presentation',
-            'widgets',
+            ..._widgetDirectorySegments(
+              root == null
+                  ? const ForgeKitConfig()
+                  : loadForgeKitConfig(root: root),
+            ),
             '$snake.dart',
-          ),
+          ]),
         )
       : File(p.normalize(p.absolute(sourcePath)));
 
@@ -111,14 +113,11 @@ Future<SyncedWidget?> installSyncedWidget({
   if (!sourceFile.existsSync()) return null;
 
   final targetFile = File(
-    p.join(
+    p.joinAll([
       root.path,
-      'lib',
-      'core',
-      'presentation',
-      'widgets',
+      ..._widgetDirectorySegments(loadForgeKitConfig(root: root)),
       '$snake.dart',
-    ),
+    ]),
   );
 
   if (targetFile.existsSync() && !force) {
@@ -144,6 +143,13 @@ Future<SyncedWidget?> installSyncedWidget({
   await targetFile.writeAsString(contents);
   return SyncedWidget(name: snake, path: targetFile.path);
 }
+
+List<String> _widgetDirectorySegments(ForgeKitConfig config) =>
+    switch (config.architecture) {
+      'mvvm' => const ['lib', 'ui', 'core', 'widgets'],
+      'modular' => const ['lib', 'core', 'widgets'],
+      _ => const ['lib', 'core', 'presentation', 'widgets'],
+    };
 
 Future<void> _writeSyncedWidget({
   required File sourceFile,

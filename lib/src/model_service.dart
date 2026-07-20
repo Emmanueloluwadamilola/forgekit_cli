@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'utils.dart';
 
@@ -18,10 +19,21 @@ Future<int> addModel({
   required Directory root,
   String? feature,
 }) async {
+  final config = loadForgeKitConfig(root: root);
+  if (config.architecture != 'clean') {
+    logger.err(
+      'forgekit add model currently supports the clean architecture profile. '
+      'This project uses ${config.architecture}.',
+    );
+    return 1;
+  }
   final base = pascalCase(name);
   final snake = snakeCase(name);
-  if (base.isEmpty) {
-    logger.err('A model name is required, e.g. "forgekit add model User".');
+  if (base.isEmpty || !RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(base)) {
+    logger.err(
+      'Use a model name whose generated Dart type starts with a letter and '
+      'contains only letters or digits, e.g. "forgekit add model User".',
+    );
     return 1;
   }
   final projectName = detectProjectName(root: root);
@@ -41,8 +53,7 @@ Future<int> addModel({
     if (decoded is Map) {
       classes = analyzeJson(base, decoded.cast<String, dynamic>());
     } else if (decoded is List && decoded.isNotEmpty && decoded.first is Map) {
-      classes =
-          analyzeJson(base, (decoded.first as Map).cast<String, dynamic>());
+      classes = analyzeJsonObjects(base, decoded);
     } else {
       logger.err('Top-level JSON must be an object or a list of objects.');
       return 1;

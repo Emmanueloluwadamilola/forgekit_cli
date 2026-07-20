@@ -30,8 +30,25 @@ Future<int> addFunction({
   final fnSnake = _snake(functionName);
   final fnPascal = _pascal(functionName);
   final fnCamel = _camel(functionName);
+  if (featureSnake.isEmpty ||
+      fnSnake.isEmpty ||
+      !RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(fnPascal)) {
+    logger.err(
+      'Feature and function names must contain letters or digits and the '
+      'generated Dart type must start with a letter.',
+    );
+    return 1;
+  }
   final projectName = detectProjectName(root: root);
-  final stateManagement = loadForgeKitConfig(root: root).stateManagement;
+  final config = loadForgeKitConfig(root: root);
+  if (config.architecture != 'clean') {
+    logger.err(
+      'forgekit add function currently supports the clean architecture '
+      'profile. This project uses ${config.architecture}.',
+    );
+    return 1;
+  }
+  final stateManagement = config.stateManagement;
 
   final featureDir =
       Directory(p.join(root.path, 'lib', 'features', featureSnake));
@@ -64,6 +81,13 @@ Future<int> addFunction({
   final endpoint = (path == null || path.isEmpty)
       ? logger.prompt('Endpoint path?', defaultValue: '/$fnSnake')
       : path;
+  if (!endpoint.startsWith('/') || endpoint.contains(RegExp(r'[\x00-\x1F]'))) {
+    logger.err(
+      'Endpoint paths must start with "/" and must not contain control '
+      'characters.',
+    );
+    return 1;
+  }
 
   logger.info('');
   logger.info(
@@ -320,8 +344,7 @@ _ResponseSpec _parseResponse(String jsonText, String fnPascal) {
   }
   if (decoded is List && decoded.isNotEmpty && decoded.first is Map) {
     return _ResponseSpec(
-      classes:
-          analyzeJson(base, (decoded.first as Map).cast<String, dynamic>()),
+      classes: analyzeJsonObjects(base, decoded),
       modelType: 'List<$base>',
       dtoType: 'List<${base}Dto>',
       isList: true,
@@ -432,7 +455,9 @@ void _wireApiService(
 
   final method = StringBuffer()
     ..writeln()
-    ..writeln("  @$httpMethod('$endpoint')")
+    ..writeln(
+      "  @$httpMethod('${_escapeDartString(encodeRetrofitUrlLiteral(endpoint))}')",
+    )
     ..writeln('  Future<${response.dtoType}> $fnCamel($body);');
 
   var content = _addImports(file.readAsStringSync(), imports);
@@ -779,6 +804,11 @@ String _addImports(String content, List<String> uris) {
 String _snake(String input) => snakeCase(input);
 String _pascal(String input) => pascalCase(input);
 String _camel(String input) => camelCase(input);
+
+String _escapeDartString(String value) => value
+    .replaceAll(r'\', r'\\')
+    .replaceAll("'", r"\'")
+    .replaceAll(r'$', r'\$');
 
 class _GenException implements Exception {
   const _GenException(this.message);

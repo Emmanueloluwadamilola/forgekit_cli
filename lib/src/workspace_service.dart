@@ -96,7 +96,6 @@ Future<PubWorkspace> discoverPubWorkspace({Directory? start}) async {
       'dart',
       ['pub', 'workspace', 'list', '--json'],
       workingDirectory: workingDirectory.path,
-      runInShell: true,
     );
   } on ProcessException catch (error) {
     throw WorkspaceException(

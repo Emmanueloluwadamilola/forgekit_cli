@@ -8,6 +8,15 @@ import '../config_service.dart';
 import '../font_service.dart';
 import '../utils.dart';
 
+const supportedFlutterPlatforms = <String>[
+  'android',
+  'ios',
+  'web',
+  'macos',
+  'windows',
+  'linux',
+];
+
 /// `forgekit create ...`
 ///
 /// Parent command grouping project-creation sub-commands. Currently exposes a
@@ -54,6 +63,14 @@ class _CreateAppCommand extends Command<int> {
         'state-management',
         help: 'State management used by the generated project.',
         allowed: supportedStateManagement,
+      )
+      ..addMultiOption(
+        'platforms',
+        help: 'Flutter target platforms. Pass a comma-separated list to run '
+            'non-interactively.',
+        valueHelp: 'android,ios,web,macos,windows,linux',
+        allowed: supportedFlutterPlatforms,
+        splitCommas: true,
       );
   }
 
@@ -71,7 +88,8 @@ class _CreateAppCommand extends Command<int> {
       'forgekit create app <name> [--org <org>] [--font <FontName>] '
       '[--architecture clean|mvvm|modular] '
       '[--router named|go_router] '
-      '[--state-management provider|riverpod|bloc|cubit]';
+      '[--state-management provider|riverpod|bloc|cubit] '
+      '[--platforms android,ios,web,macos,windows,linux]';
 
   @override
   Future<int> run() async {
@@ -91,7 +109,35 @@ class _CreateAppCommand extends Command<int> {
     }
 
     final name = rest.first;
+    if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(name)) {
+      _logger.err(
+        'Project name must be a lowercase Dart package name containing only '
+        'letters, digits, and underscores, and it must start with a letter.',
+      );
+      return 1;
+    }
+    final destination = Directory(p.join(Directory.current.path, name));
+    final destinationType = FileSystemEntity.typeSync(
+      destination.path,
+      followLinks: false,
+    );
+    if (destinationType != FileSystemEntityType.notFound) {
+      _logger.err(
+        'Destination already exists: ${destination.path}\n'
+        'ForgeKit refuses to create into an existing file, directory, or '
+        'symbolic link.',
+      );
+      return 1;
+    }
+
     final org = args['org'] as String;
+    if (!RegExp(r'^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$').hasMatch(org)) {
+      _logger.err(
+        '--org must be a lowercase reverse-domain identifier such as '
+        'com.example or io.example_team.',
+      );
+      return 1;
+    }
     final font = args['font'] as String?;
     final architecture = args['architecture'] as String? ??
         _logger.chooseOne(
@@ -108,8 +154,15 @@ class _CreateAppCommand extends Command<int> {
       );
       return 1;
     }
-    final router =
-        architecture == 'modular' ? 'modular' : requestedRouter ?? 'named';
+    final router = architecture == 'modular'
+        ? 'modular'
+        : requestedRouter ??
+            _logger.chooseOne(
+              'Select routing:',
+              choices: const ['go_router', 'named'],
+              defaultValue: 'go_router',
+            ) ??
+            'go_router';
     final stateManagement = args['state-management'] as String? ??
         _logger.chooseOne(
           'Select state management:',
@@ -125,108 +178,165 @@ class _CreateAppCommand extends Command<int> {
       _ => 'forge_app',
     };
 
-    final platforms = _logger.chooseAny(
-      'Select target platforms to support:',
-      choices: ['android', 'ios', 'web', 'macos', 'windows', 'linux'],
-      defaultValues: ['android', 'ios', 'web', 'macos', 'windows', 'linux'],
-    );
+    final platforms = args.wasParsed('platforms')
+        ? (args['platforms'] as List<String>).toSet().toList()
+        : _logger.chooseAny(
+            'Select target platforms to support:',
+            choices: supportedFlutterPlatforms,
+            defaultValues: supportedFlutterPlatforms,
+          );
 
     if (platforms.isEmpty) {
       _logger.err('You must select at least one target platform.');
       return 1;
     }
 
-    final progress = _logger.progress('Creating app "$name"');
-
+    var creationComplete = false;
     try {
-      final flutterResult = await Process.run(
-        'flutter',
-        ['create', '--org', org, '--platforms', platforms.join(','), name],
-        runInShell: true,
-      );
-      if (flutterResult.exitCode != 0) {
-        progress.fail(
-          'Failed to run "flutter create". Make sure Flutter is installed.',
+      final progress = _logger.progress('Creating app "$name"');
+
+      try {
+        final flutterResult = await Process.run(
+          'flutter',
+          ['create', '--org', org, '--platforms', platforms.join(','), name],
+          runInShell: Platform.isWindows,
         );
-        _logger.err(flutterResult.stderr.toString());
+        if (flutterResult.exitCode != 0) {
+          progress.fail(
+            'Failed to run "flutter create". Make sure Flutter is installed.',
+          );
+          _logger.err(flutterResult.stderr.toString());
+          return 1;
+        }
+      } on ProcessException catch (e) {
+        progress.fail(
+          'Could not start the "flutter" executable. Make sure Flutter is installed and on your PATH.',
+        );
+        _logger.err(e.message);
         return 1;
       }
-    } on ProcessException catch (e) {
-      progress.fail(
-        'Could not start the "flutter" executable. Make sure Flutter is installed and on your PATH.',
+
+      // Flutter created this destination during this invocation, so the app
+      // brick may safely replace Flutter's standard starter files.
+      final exitCode = await runMason(
+        [
+          'make',
+          appBrick,
+          '-o',
+          name,
+          '--name',
+          name,
+          '--org',
+          org,
+          '--useRouter',
+          '$useRouter',
+          ...stateFlags,
+          '--on-conflict',
+          'overwrite',
+        ],
+        logger: _logger,
       );
-      _logger.err(e.message);
-      return 1;
-    }
 
-    // Generate into a folder named after the project, overwriting standard files with templates.
-    final exitCode = await runMason(
-      [
-        'make',
-        appBrick,
-        '-o',
-        name,
-        '--name',
-        name,
-        '--org',
-        org,
-        '--useRouter',
-        '$useRouter',
-        ...stateFlags,
-        '--on-conflict',
-        'overwrite',
-      ],
-      logger: _logger,
-    );
+      if (exitCode != 0) {
+        progress.fail('Failed to create app "$name".');
+        return 1;
+      }
 
-    if (exitCode != 0) {
-      progress.fail('Failed to create app "$name".');
-      return 1;
-    }
-
-    final flutterSampleTest = File(
-      p.join(name, 'test', 'widget_test.dart'),
-    );
-    if (flutterSampleTest.existsSync()) {
-      await flutterSampleTest.delete();
-    }
-
-    progress.complete('Created app "$name" in ./$name');
-
-    try {
-      await saveForgeKitConfig(
-        root: Directory(name),
-        config: ForgeKitConfig(
-          architecture: architecture,
-          stateManagement: stateManagement,
-          router: router,
-          dependencyInjection:
-              architecture == 'modular' ? 'flutter_modular' : 'injectable',
-        ),
+      final flutterSampleTest = File(
+        p.join(destination.path, 'test', 'widget_test.dart'),
       );
-    } on ConfigException catch (error) {
-      _logger.err('App created, but forgekit.yaml could not be written: '
-          '${error.message}');
-      return 1;
-    }
+      if (flutterSampleTest.existsSync()) {
+        await flutterSampleTest.delete();
+      }
 
-    // Optionally download and wire up a Google Font into the new project.
-    if (font != null && font.trim().isNotEmpty) {
-      final fontExit = await addFont(font, logger: _logger, projectDir: name);
-      if (fontExit != 0) {
-        _logger.warn(
-          'App created, but the font "$font" could not be added. '
-          'You can retry later with: cd $name && forgekit add font $font',
+      try {
+        await saveForgeKitConfig(
+          root: destination,
+          config: ForgeKitConfig(
+            architecture: architecture,
+            stateManagement: stateManagement,
+            router: router,
+            dependencyInjection:
+                architecture == 'modular' ? 'flutter_modular' : 'injectable',
+          ),
         );
+      } on ConfigException catch (error) {
+        _logger.err('App creation failed while writing forgekit.yaml: '
+            '${error.message}');
+        return 1;
+      }
+
+      creationComplete = true;
+      progress.complete('Created app "$name" in ./$name');
+
+      // Optionally download and wire up a Google Font into the new project.
+      if (font != null && font.trim().isNotEmpty) {
+        final fontExit = await addFont(
+          font,
+          logger: _logger,
+          projectDir: destination.path,
+        );
+        if (fontExit != 0) {
+          _logger.warn(
+            'App created, but the font "$font" could not be added. '
+            'You can retry later with: cd $name && forgekit add font $font',
+          );
+        }
+      }
+
+      _logger
+        ..info('')
+        ..info('Next steps:')
+        ..info('  cd $name')
+        ..info('  flutter pub get')
+        ..info('  dart run build_runner build');
+      return 0;
+    } finally {
+      if (!creationComplete &&
+          FileSystemEntity.typeSync(destination.path, followLinks: false) !=
+              FileSystemEntityType.notFound) {
+        try {
+          final type = FileSystemEntity.typeSync(
+            destination.path,
+            followLinks: false,
+          );
+          var removed = false;
+          switch (type) {
+            case FileSystemEntityType.directory:
+              await destination.delete(recursive: true);
+              removed = true;
+              break;
+            case FileSystemEntityType.file:
+              await File(destination.path).delete();
+              removed = true;
+              break;
+            case FileSystemEntityType.link:
+              await Link(destination.path).delete();
+              removed = true;
+              break;
+            case FileSystemEntityType.notFound:
+            case FileSystemEntityType.pipe:
+            case FileSystemEntityType.unixDomainSock:
+              break;
+          }
+          if (removed) {
+            _logger.warn(
+              'Removed incomplete app destination after creation failed: '
+              '${destination.path}',
+            );
+          } else if (type != FileSystemEntityType.notFound) {
+            _logger.err(
+              'Refused to remove an unexpected filesystem object at the app '
+              'destination after creation failed: ${destination.path}',
+            );
+          }
+        } on FileSystemException catch (error) {
+          _logger.err(
+            'Could not remove the incomplete app destination '
+            '${destination.path}: ${error.message}',
+          );
+        }
       }
     }
-
-    _logger
-      ..info('')
-      ..info('Next steps:')
-      ..info('  cd $name')
-      ..info('  flutter pub get')
-      ..info('  dart run build_runner build');
-    return 0;
   }
 }

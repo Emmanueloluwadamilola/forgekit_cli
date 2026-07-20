@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:collection';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:mason_logger/mason_logger.dart';
@@ -8,7 +10,7 @@ import 'package:yaml/yaml.dart';
 
 import 'config_service.dart';
 import 'json_to_dart.dart';
-import 'test_service.dart';
+import 'route_wiring_service.dart';
 import 'utils.dart';
 
 const _httpMethods = {
@@ -20,6 +22,9 @@ const _httpMethods = {
   'head',
   'options',
 };
+
+const _maximumOpenApiDocuments = 64;
+const _maximumOpenApiDocumentBytes = 5 * 1024 * 1024;
 
 class OpenApiException implements Exception {
   const OpenApiException(this.message);
@@ -36,37 +41,112 @@ class OpenApiDocument {
     required this.title,
     required this.serverUrl,
     required this.operations,
-    required Map<String, dynamic> source,
-  }) : _source = source;
+    required this.securitySchemes,
+    required this.defaultSecurity,
+    required Uri entryUri,
+    required Map<Uri, Map<String, dynamic>> sources,
+    required Map<Map<String, dynamic>, Uri> origins,
+  })  : _entryUri = entryUri,
+        _sources = sources,
+        _origins = origins;
 
   final String version;
   final String title;
   final String? serverUrl;
   final List<OpenApiOperation> operations;
-  final Map<String, dynamic> _source;
+  final Map<String, OpenApiSecurityScheme> securitySchemes;
+  final List<OpenApiSecurityRequirement> defaultSecurity;
+  final Uri _entryUri;
+  final Map<Uri, Map<String, dynamic>> _sources;
+  final Map<Map<String, dynamic>, Uri> _origins;
 
   Map<String, dynamic> resolve(Map<String, dynamic> value) {
+    return _resolve(value, <String>{});
+  }
+
+  String referenceKey(Map<String, dynamic> value) {
+    final ref = value[r'$ref'];
+    if (ref is! String) return '';
+    final origin = _origins[value] ?? _entryUri;
+    return origin.resolve(ref).toString();
+  }
+
+  Map<String, dynamic> _resolve(
+    Map<String, dynamic> value,
+    Set<String> chain,
+  ) {
     final ref = value[r'$ref'];
     if (ref is! String) return value;
-    if (!ref.startsWith('#/')) {
+    final origin = _origins[value] ?? _entryUri;
+    final targetUri = origin.resolve(ref);
+    final key = targetUri.toString();
+    if (!chain.add(key)) {
       throw OpenApiException(
-        'External OpenAPI references are not supported yet: $ref',
+        'Cyclic OpenAPI reference cannot be resolved directly: $key',
       );
     }
 
-    Object? current = _source;
-    for (final encoded in ref.substring(2).split('/')) {
+    final documentUri = targetUri.removeFragment();
+    Object? current = _sources[documentUri];
+    if (current == null) {
+      throw OpenApiException(
+        'OpenAPI reference document was not loaded: $documentUri',
+      );
+    }
+    final fragment = targetUri.fragment;
+    if (fragment.isNotEmpty && !fragment.startsWith('/')) {
+      throw OpenApiException(
+        'OpenAPI references must use a JSON Pointer fragment: $key',
+      );
+    }
+    for (final encoded in fragment.isEmpty
+        ? const <String>[]
+        : fragment.substring(1).split('/')) {
       final segment = encoded.replaceAll('~1', '/').replaceAll('~0', '~');
       if (current is! Map<String, dynamic> || !current.containsKey(segment)) {
-        throw OpenApiException('OpenAPI reference does not exist: $ref');
+        throw OpenApiException('OpenAPI reference does not exist: $key');
       }
       current = current[segment];
     }
     if (current is! Map<String, dynamic>) {
-      throw OpenApiException('OpenAPI reference is not an object: $ref');
+      throw OpenApiException('OpenAPI reference is not an object: $key');
     }
-    return current;
+    final resolved = _resolve(current, chain);
+    if (value.length == 1) return resolved;
+    return <String, dynamic>{
+      ...resolved,
+      for (final entry in value.entries)
+        if (entry.key != r'$ref') entry.key: entry.value,
+    };
   }
+}
+
+enum OpenApiSecurityType { apiKey, http, oauth2, openIdConnect, mutualTls }
+
+class OpenApiSecurityScheme {
+  const OpenApiSecurityScheme({
+    required this.name,
+    required this.type,
+    required this.parameterName,
+    required this.location,
+    required this.scheme,
+    required this.bearerFormat,
+  });
+
+  final String name;
+  final OpenApiSecurityType type;
+  final String? parameterName;
+  final String? location;
+  final String? scheme;
+  final String? bearerFormat;
+}
+
+class OpenApiSecurityRequirement {
+  const OpenApiSecurityRequirement(this.schemes);
+
+  final Map<String, List<String>> schemes;
+
+  bool get allowsAnonymous => schemes.isEmpty;
 }
 
 class OpenApiOperation {
@@ -81,6 +161,7 @@ class OpenApiOperation {
     required this.requestRequired,
     required this.responseSchema,
     required this.responseStatus,
+    required this.security,
   });
 
   final String name;
@@ -93,6 +174,7 @@ class OpenApiOperation {
   final bool requestRequired;
   final Map<String, dynamic>? responseSchema;
   final String? responseStatus;
+  final List<OpenApiSecurityRequirement> security;
 }
 
 class OpenApiParameter {
@@ -109,26 +191,56 @@ class OpenApiParameter {
   final Map<String, dynamic> schema;
 }
 
-Future<String> loadOpenApiSource(String source) async {
-  final uri = Uri.tryParse(source);
-  if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
-    final response = await http.get(uri);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw OpenApiException(
-        'Could not download OpenAPI document (${response.statusCode}).',
-      );
-    }
-    return response.body;
-  }
-
-  final file = File(source).absolute;
-  if (!file.existsSync()) {
-    throw OpenApiException('OpenAPI file not found: ${file.path}');
-  }
-  return file.readAsString();
+/// Loads a local or remote OpenAPI entry document and every referenced
+/// document before parsing it. Remote descriptions may reference HTTPS
+/// documents on the same origin. Local descriptions may reference files that
+/// remain under the entry document's directory.
+Future<OpenApiDocument> loadOpenApiDocument(
+  String source, {
+  bool allowRemoteReferences = false,
+}) async {
+  final entryUri = _openApiSourceUri(source).removeFragment();
+  final sources = <Uri, Map<String, dynamic>>{};
+  final loading = <Uri>{};
+  await _loadOpenApiDocuments(
+    entryUri: entryUri,
+    documentUri: entryUri,
+    sources: sources,
+    loading: loading,
+    allowRemoteReferences: allowRemoteReferences,
+  );
+  return _parseOpenApiSources(entryUri, sources);
 }
 
 OpenApiDocument parseOpenApi(String contents) {
+  final entryUri = Uri.parse('memory:/openapi.yaml');
+  return _parseOpenApiSources(
+    entryUri,
+    {entryUri: _decodeOpenApi(contents)},
+  );
+}
+
+OpenApiDocument _parseOpenApiSources(
+  Uri entryUri,
+  Map<Uri, Map<String, dynamic>> sources,
+) {
+  final plain = sources[entryUri];
+  if (plain == null) {
+    throw const OpenApiException('The OpenAPI entry document was not loaded.');
+  }
+  final origins = HashMap<Map<String, dynamic>, Uri>.identity();
+  for (final entry in sources.entries) {
+    _recordMapOrigins(entry.value, entry.key, origins);
+  }
+  return _parseOpenApiMap(
+    plain,
+    entryUri: entryUri,
+    sources: sources,
+    origins: origins,
+  );
+}
+
+Map<String, dynamic> _decodeOpenApi(String contents) {
   final Object? decoded;
   try {
     decoded = contents.trimLeft().startsWith('{')
@@ -144,10 +256,28 @@ OpenApiDocument parseOpenApi(String contents) {
   if (plain is! Map<String, dynamic>) {
     throw const OpenApiException('The OpenAPI document must be an object.');
   }
+  return plain;
+}
+
+OpenApiDocument _parseOpenApiMap(
+  Map<String, dynamic> plain, {
+  required Uri entryUri,
+  required Map<Uri, Map<String, dynamic>> sources,
+  required Map<Map<String, dynamic>, Uri> origins,
+}) {
   final version = plain['openapi'];
-  if (version is! String || !version.startsWith('3.')) {
+  if (version is! String ||
+      !(version.startsWith('3.0.') || version.startsWith('3.1.'))) {
     throw OpenApiException(
-      'Expected an OpenAPI 3.x document, received ${version ?? 'no version'}.',
+      'Expected an OpenAPI 3.0 or 3.1 document, received '
+      '${version ?? 'no version'}.',
+    );
+  }
+  if (version.startsWith('3.1.') && _containsJsonSchemaId(plain)) {
+    throw const OpenApiException(
+      'OpenAPI 3.1 JSON Schema `\$id` base-URI semantics are not supported. '
+      'Resolve or remove `\$id` values before importing so references cannot '
+      'be interpreted against the wrong document.',
     );
   }
 
@@ -157,14 +287,24 @@ OpenApiDocument parseOpenApi(String contents) {
   final firstServer = _firstOrNull(
     servers.whereType<Map<String, dynamic>>(),
   );
-  final serverUrl =
-      firstServer?['url'] is String ? firstServer!['url'] as String : null;
+  final serverUrl = _expandServerUrl(firstServer);
+  final securitySchemes = <String, OpenApiSecurityScheme>{};
   final document = OpenApiDocument(
     version: version,
     title: title,
     serverUrl: serverUrl,
     operations: [],
-    source: plain,
+    securitySchemes: securitySchemes,
+    defaultSecurity: const [],
+    entryUri: entryUri,
+    sources: sources,
+    origins: origins,
+  );
+  securitySchemes.addAll(_parseSecuritySchemes(document, plain['components']));
+  final defaultSecurity = _parseSecurityRequirements(
+    document,
+    plain['security'],
+    securitySchemes,
   );
 
   final paths = _mapOrEmpty(plain['paths']);
@@ -191,6 +331,13 @@ OpenApiDocument parseOpenApi(String contents) {
       final parameters = _mergeParameters(pathParameters, operationParameters);
       final requestBody = _parseRequestBody(document, operation['requestBody']);
       final response = _parseResponse(document, operation['responses']);
+      final security = operation.containsKey('security')
+          ? _parseSecurityRequirements(
+              document,
+              operation['security'],
+              securitySchemes,
+            )
+          : defaultSecurity;
       final tags = _listOrEmpty(operation['tags'])
           .whereType<String>()
           .where((tag) => tag.trim().isNotEmpty)
@@ -214,6 +361,7 @@ OpenApiDocument parseOpenApi(String contents) {
           requestRequired: requestBody?.required ?? false,
           responseSchema: response?.schema,
           responseStatus: response?.status,
+          security: security,
         ),
       );
     }
@@ -224,13 +372,440 @@ OpenApiDocument parseOpenApi(String contents) {
     );
   }
 
-  return OpenApiDocument(
+  final parsedDocument = OpenApiDocument(
     version: version,
     title: title,
     serverUrl: serverUrl,
     operations: operations,
-    source: plain,
+    securitySchemes: securitySchemes,
+    defaultSecurity: defaultSecurity,
+    entryUri: entryUri,
+    sources: sources,
+    origins: origins,
   );
+  for (final operation in parsedDocument.operations) {
+    _buildOperation(parsedDocument, operation);
+  }
+  return parsedDocument;
+}
+
+String? _expandServerUrl(Map<String, dynamic>? server) {
+  final rawUrl = server?['url'];
+  if (rawUrl is! String || rawUrl.trim().isEmpty) return null;
+  final variables = _mapOrEmpty(server?['variables']);
+  return rawUrl.replaceAllMapped(RegExp(r'\{([^{}]+)\}'), (match) {
+    final name = match.group(1)!;
+    final variable = _mapOrEmpty(variables[name]);
+    final defaultValue = variable['default'];
+    if (defaultValue is! String) {
+      throw OpenApiException(
+        'OpenAPI server variable "$name" requires a string default value.',
+      );
+    }
+    return defaultValue;
+  });
+}
+
+Uri _openApiSourceUri(String source) {
+  final parsed = Uri.tryParse(source);
+  if (parsed != null && parsed.scheme == 'http') {
+    throw const OpenApiException(
+      'Remote OpenAPI documents require HTTPS. Download trusted local HTTP '
+      'documents first and import the local file.',
+    );
+  }
+  if (parsed != null && parsed.scheme == 'https') {
+    if (parsed.userInfo.isNotEmpty) {
+      throw const OpenApiException(
+        'OpenAPI URLs must not contain embedded credentials.',
+      );
+    }
+    if (_containsSensitiveUrlQuery(parsed)) {
+      throw const OpenApiException(
+        'OpenAPI URLs must not contain credential-like query parameters. '
+        'Download the document with your authenticated client and import the '
+        'local file instead.',
+      );
+    }
+    if (parsed.fragment.isNotEmpty) {
+      throw const OpenApiException(
+        'The OpenAPI entry URL must identify a document, not a fragment.',
+      );
+    }
+    return parsed;
+  }
+  if (parsed != null && parsed.scheme == 'file') {
+    return File.fromUri(parsed).absolute.uri;
+  }
+  return File(source).absolute.uri;
+}
+
+Future<void> _loadOpenApiDocuments({
+  required Uri entryUri,
+  required Uri documentUri,
+  required Map<Uri, Map<String, dynamic>> sources,
+  required Set<Uri> loading,
+  required bool allowRemoteReferences,
+}) async {
+  final canonical = documentUri.removeFragment();
+  if (sources.containsKey(canonical) || !loading.add(canonical)) return;
+  if (sources.length >= _maximumOpenApiDocuments) {
+    throw const OpenApiException(
+      'OpenAPI input exceeds the 64-document safety limit.',
+    );
+  }
+  final contents = await _readOpenApiUri(canonical);
+  final document = _decodeOpenApi(contents);
+  sources[canonical] = document;
+
+  try {
+    for (final ref in _collectOpenApiReferences(document)) {
+      final target = canonical.resolve(ref);
+      final targetDocument = target.removeFragment();
+      if (targetDocument == canonical) continue;
+      _validateExternalReference(
+        entryUri,
+        targetDocument,
+        allowRemoteReferences: allowRemoteReferences,
+      );
+      await _loadOpenApiDocuments(
+        entryUri: entryUri,
+        documentUri: targetDocument,
+        sources: sources,
+        loading: loading,
+        allowRemoteReferences: allowRemoteReferences,
+      );
+    }
+  } finally {
+    loading.remove(canonical);
+  }
+}
+
+Future<String> _readOpenApiUri(Uri uri) async {
+  if (uri.scheme == 'https') {
+    if (uri.userInfo.isNotEmpty) {
+      throw const OpenApiException(
+        'OpenAPI reference URLs must not contain embedded credentials.',
+      );
+    }
+    if (_containsSensitiveUrlQuery(uri)) {
+      throw const OpenApiException(
+        'OpenAPI reference URLs must not contain credential-like query '
+        'parameters.',
+      );
+    }
+    return _readRemoteOpenApiUri(uri);
+  }
+  if (uri.scheme == 'file') {
+    final file = File.fromUri(uri);
+    if (!file.existsSync()) {
+      throw OpenApiException('OpenAPI file not found: ${file.path}');
+    }
+    if (file.lengthSync() > _maximumOpenApiDocumentBytes) {
+      throw OpenApiException(
+        'OpenAPI document exceeds the 5 MiB safety limit: ${file.path}',
+      );
+    }
+    return file.readAsString();
+  }
+  throw OpenApiException(
+    'Unsupported OpenAPI reference scheme "${uri.scheme}" in $uri.',
+  );
+}
+
+void _validateExternalReference(
+  Uri entryUri,
+  Uri target, {
+  required bool allowRemoteReferences,
+}) {
+  if (target.userInfo.isNotEmpty) {
+    throw const OpenApiException(
+      'OpenAPI reference URLs must not contain embedded credentials.',
+    );
+  }
+  if (_containsSensitiveUrlQuery(target)) {
+    throw const OpenApiException(
+      'OpenAPI reference URLs must not contain credential-like query '
+      'parameters.',
+    );
+  }
+  if (entryUri.scheme == 'https') {
+    if (target.scheme != entryUri.scheme ||
+        target.host != entryUri.host ||
+        target.port != entryUri.port) {
+      throw OpenApiException(
+        'Remote OpenAPI documents may only reference the same origin. '
+        'Rejected: $target',
+      );
+    }
+    return;
+  }
+  if (target.scheme == 'https') {
+    if (!allowRemoteReferences) {
+      throw OpenApiException(
+        'Local OpenAPI documents may not fetch remote references by default. '
+        'Download the referenced file locally or explicitly allow remote '
+        'references. Rejected: $target',
+      );
+    }
+    return;
+  }
+  if (target.scheme != 'file') {
+    throw OpenApiException(
+      'Local OpenAPI documents may reference local files or HTTPS documents. '
+      'Rejected: $target',
+    );
+  }
+  final root = p.dirname(File.fromUri(entryUri).absolute.path);
+  final path = File.fromUri(target).absolute.path;
+  if (path != root && !p.isWithin(root, path)) {
+    throw OpenApiException(
+      'Local OpenAPI reference escapes the entry document directory: $path',
+    );
+  }
+}
+
+Future<String> _readRemoteOpenApiUri(Uri initialUri) async {
+  final client = http.Client();
+  var current = initialUri;
+  try {
+    for (var redirects = 0; redirects <= 5; redirects++) {
+      final request = http.Request('GET', current)..followRedirects = false;
+      final response = await client.send(request);
+      if (response.isRedirect) {
+        await response.stream.drain<void>();
+        final location = response.headers['location'];
+        if (location == null || location.trim().isEmpty) {
+          throw OpenApiException(
+            'OpenAPI redirect from $current did not include a location.',
+          );
+        }
+        if (redirects == 5) {
+          throw OpenApiException(
+            'OpenAPI download exceeded the 5-redirect safety limit: '
+            '$initialUri',
+          );
+        }
+        final next = current.resolve(location);
+        if (next.scheme != 'https' ||
+            next.userInfo.isNotEmpty ||
+            _containsSensitiveUrlQuery(next) ||
+            !_sameOrigin(initialUri, next)) {
+          throw OpenApiException(
+            'OpenAPI redirects must remain on the original HTTPS origin. '
+            'Rejected: $next',
+          );
+        }
+        current = next;
+        continue;
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.stream.drain<void>();
+        throw OpenApiException(
+          'Could not download OpenAPI document $current '
+          '(${response.statusCode}).',
+        );
+      }
+
+      final bytes = BytesBuilder(copy: false);
+      var length = 0;
+      await for (final chunk in response.stream) {
+        length += chunk.length;
+        if (length > _maximumOpenApiDocumentBytes) {
+          throw OpenApiException(
+            'OpenAPI document exceeds the 5 MiB safety limit: $current',
+          );
+        }
+        bytes.add(chunk);
+      }
+      try {
+        return utf8.decode(bytes.takeBytes());
+      } on FormatException {
+        throw OpenApiException(
+          'OpenAPI document is not valid UTF-8: $current',
+        );
+      }
+    }
+    throw OpenApiException('Could not download OpenAPI document $initialUri.');
+  } finally {
+    client.close();
+  }
+}
+
+bool _sameOrigin(Uri first, Uri second) =>
+    first.scheme == second.scheme &&
+    first.host == second.host &&
+    first.port == second.port;
+
+bool _containsSensitiveUrlQuery(Uri uri) => uri.queryParameters.keys.any(
+      (key) => RegExp(
+        r'(token|secret|signature|credential|password|api[-_]?key|auth)',
+        caseSensitive: false,
+      ).hasMatch(key),
+    );
+
+Iterable<String> _collectOpenApiReferences(Object? value) sync* {
+  if (value is Map<String, dynamic>) {
+    final ref = value[r'$ref'];
+    if (ref is String && ref.trim().isNotEmpty) yield ref;
+    for (final child in value.values) {
+      yield* _collectOpenApiReferences(child);
+    }
+  } else if (value is List<dynamic>) {
+    for (final child in value) {
+      yield* _collectOpenApiReferences(child);
+    }
+  }
+}
+
+void _recordMapOrigins(
+  Object? value,
+  Uri origin,
+  Map<Map<String, dynamic>, Uri> origins,
+) {
+  if (value is Map<String, dynamic>) {
+    origins[value] = origin;
+    for (final child in value.values) {
+      _recordMapOrigins(child, origin, origins);
+    }
+  } else if (value is List<dynamic>) {
+    for (final child in value) {
+      _recordMapOrigins(child, origin, origins);
+    }
+  }
+}
+
+Map<String, OpenApiSecurityScheme> _parseSecuritySchemes(
+  OpenApiDocument document,
+  Object? componentsValue,
+) {
+  final components = _mapOrEmpty(componentsValue);
+  final values = _mapOrEmpty(components['securitySchemes']);
+  final schemes = <String, OpenApiSecurityScheme>{};
+  for (final entry in values.entries) {
+    if (entry.value is! Map<String, dynamic>) {
+      throw OpenApiException(
+        'OpenAPI security scheme "${entry.key}" must be an object.',
+      );
+    }
+    final value = document.resolve(entry.value as Map<String, dynamic>);
+    final type = value['type'];
+    switch (type) {
+      case 'apiKey':
+        final parameterName = value['name'];
+        final location = value['in'];
+        if (parameterName is! String ||
+            location is! String ||
+            !{'header', 'query', 'cookie'}.contains(location)) {
+          throw OpenApiException(
+            'API-key security scheme "${entry.key}" requires a name and a '
+            'header, query, or cookie location.',
+          );
+        }
+        schemes[entry.key] = OpenApiSecurityScheme(
+          name: entry.key,
+          type: OpenApiSecurityType.apiKey,
+          parameterName: parameterName,
+          location: location,
+          scheme: null,
+          bearerFormat: null,
+        );
+      case 'http':
+        final scheme = value['scheme'];
+        if (scheme is! String || scheme.trim().isEmpty) {
+          throw OpenApiException(
+            'HTTP security scheme "${entry.key}" requires `scheme`.',
+          );
+        }
+        schemes[entry.key] = OpenApiSecurityScheme(
+          name: entry.key,
+          type: OpenApiSecurityType.http,
+          parameterName: 'Authorization',
+          location: 'header',
+          scheme: scheme.toLowerCase(),
+          bearerFormat: value['bearerFormat'] as String?,
+        );
+      case 'oauth2':
+        if (_mapOrEmpty(value['flows']).isEmpty) {
+          throw OpenApiException(
+            'OAuth2 security scheme "${entry.key}" requires `flows`.',
+          );
+        }
+        schemes[entry.key] = OpenApiSecurityScheme(
+          name: entry.key,
+          type: OpenApiSecurityType.oauth2,
+          parameterName: 'Authorization',
+          location: 'header',
+          scheme: 'bearer',
+          bearerFormat: null,
+        );
+      case 'openIdConnect':
+        if (value['openIdConnectUrl'] is! String) {
+          throw OpenApiException(
+            'OpenID Connect security scheme "${entry.key}" requires '
+            '`openIdConnectUrl`.',
+          );
+        }
+        schemes[entry.key] = OpenApiSecurityScheme(
+          name: entry.key,
+          type: OpenApiSecurityType.openIdConnect,
+          parameterName: 'Authorization',
+          location: 'header',
+          scheme: 'bearer',
+          bearerFormat: null,
+        );
+      case 'mutualTLS':
+        schemes[entry.key] = OpenApiSecurityScheme(
+          name: entry.key,
+          type: OpenApiSecurityType.mutualTls,
+          parameterName: null,
+          location: null,
+          scheme: null,
+          bearerFormat: null,
+        );
+      default:
+        throw OpenApiException(
+          'Unsupported OpenAPI security scheme type "$type" for '
+          '"${entry.key}".',
+        );
+    }
+  }
+  return schemes;
+}
+
+List<OpenApiSecurityRequirement> _parseSecurityRequirements(
+  OpenApiDocument document,
+  Object? value,
+  Map<String, OpenApiSecurityScheme> schemes,
+) {
+  if (value == null) return const [];
+  final values = _listOrEmpty(value);
+  final requirements = <OpenApiSecurityRequirement>[];
+  for (final raw in values) {
+    if (raw is! Map<String, dynamic>) {
+      throw const OpenApiException(
+        'OpenAPI security requirements must be objects.',
+      );
+    }
+    final requirement = <String, List<String>>{};
+    for (final entry in raw.entries) {
+      if (!schemes.containsKey(entry.key)) {
+        throw OpenApiException(
+          'OpenAPI security requirement references undefined scheme '
+          '"${entry.key}".',
+        );
+      }
+      final scopes = _listOrEmpty(entry.value);
+      if (scopes.any((scope) => scope is! String)) {
+        throw OpenApiException(
+          'Security scopes for "${entry.key}" must be strings.',
+        );
+      }
+      requirement[entry.key] = scopes.cast<String>();
+    }
+    requirements.add(OpenApiSecurityRequirement(requirement));
+  }
+  return requirements;
 }
 
 List<OpenApiParameter> _parseParameters(
@@ -244,10 +819,52 @@ List<OpenApiParameter> _parseParameters(
     final name = parameter['name'];
     final location = parameter['in'];
     if (name is! String || location is! String) continue;
-    if (!{'path', 'query', 'header'}.contains(location)) continue;
+    if (!{'path', 'query', 'header', 'cookie'}.contains(location)) continue;
     var schema = _mapOrEmpty(parameter['schema']);
     if (schema.isEmpty) {
       schema = _schemaFromContent(parameter['content']);
+    }
+    final resolvedSchema = document.resolve(schema);
+    final type = _effectiveSchemaType(resolvedSchema);
+    final defaultStyle = switch (location) {
+      'path' || 'header' => 'simple',
+      'query' || 'cookie' => 'form',
+      _ => null,
+    };
+    final style = parameter['style'] ?? defaultStyle;
+    if (style != defaultStyle) {
+      throw OpenApiException(
+        'Parameter "$name" uses unsupported $location style "$style". '
+        'ForgeKit supports the OpenAPI default $defaultStyle style.',
+      );
+    }
+    if ((location == 'path' || location == 'header') &&
+        (type == 'array' || type == 'object')) {
+      throw OpenApiException(
+        '${pascalCase(location)} parameter "$name" must use a scalar schema.',
+      );
+    }
+    if (location == 'query' && type == 'object') {
+      throw OpenApiException(
+        'Query parameter "$name" uses an object schema. Deep-object query '
+        'serialization is not supported.',
+      );
+    }
+    if (location == 'query' &&
+        type == 'array' &&
+        parameter['explode'] == false) {
+      throw OpenApiException(
+        'Query array parameter "$name" uses explode: false. CSV query array '
+        'serialization is not supported.',
+      );
+    }
+    if (location == 'cookie') {
+      if (type == 'array' || type == 'object') {
+        throw OpenApiException(
+          'Cookie parameter "$name" must use a scalar schema. Array and '
+          'object cookie serialization is not supported.',
+        );
+      }
     }
     result.add(
       OpenApiParameter(
@@ -275,16 +892,22 @@ List<OpenApiParameter> _mergeParameters(
 _BodySpec? _parseRequestBody(OpenApiDocument document, Object? value) {
   if (value is! Map<String, dynamic>) return null;
   final body = document.resolve(value);
-  final schema = _schemaFromContent(body['content']);
-  if (schema.isEmpty) return null;
-  return _BodySpec(schema: schema, required: body['required'] == true);
+  final content = _jsonContentSchema(
+    body['content'],
+    context: 'request body',
+  );
+  if (content == null) return null;
+  return _BodySpec(
+    schema: content.schema,
+    required: body['required'] == true,
+  );
 }
 
 _ResponseSpec? _parseResponse(OpenApiDocument document, Object? value) {
   final responses = _mapOrEmpty(value);
   if (responses.isEmpty) return null;
   final successful = responses.entries
-      .where((entry) => RegExp(r'^2[0-9][0-9]$').hasMatch(entry.key))
+      .where((entry) => RegExp(r'^2(?:[0-9][0-9]|XX)$').hasMatch(entry.key))
       .toList()
     ..sort((a, b) => a.key.compareTo(b.key));
   final selected = successful.isNotEmpty
@@ -294,10 +917,39 @@ _ResponseSpec? _parseResponse(OpenApiDocument document, Object? value) {
         );
   if (selected == null || selected.value is! Map<String, dynamic>) return null;
   final response = document.resolve(selected.value as Map<String, dynamic>);
-  final schema = _schemaFromContent(response['content']);
+  final content = _jsonContentSchema(
+    response['content'],
+    context: 'response ${selected.key}',
+  );
   return _ResponseSpec(
     status: selected.key,
-    schema: schema.isEmpty ? null : schema,
+    schema: content?.schema.isEmpty == true ? null : content?.schema,
+  );
+}
+
+_ContentSchema? _jsonContentSchema(
+  Object? value, {
+  required String context,
+}) {
+  final content = _mapOrEmpty(value);
+  if (content.isEmpty) return null;
+  final selected = _firstOrNull(
+        content.entries.where((entry) => entry.key == 'application/json'),
+      ) ??
+      _firstOrNull(
+        content.entries.where((entry) => entry.key.endsWith('+json')),
+      ) ??
+      _firstOrNull(content.entries.where((entry) => entry.key == '*/*'));
+  if (selected == null) {
+    final mediaTypes = content.keys.toList()..sort();
+    throw OpenApiException(
+      'Unsupported OpenAPI $context media type(s): '
+      '${mediaTypes.join(', ')}. ForgeKit generates typed JSON APIs; use '
+      'application/json, a +json media type, or */*.',
+    );
+  }
+  return _ContentSchema(
+    schema: _mapOrEmpty(_mapOrEmpty(selected.value)['schema']),
   );
 }
 
@@ -354,6 +1006,12 @@ class _BodySpec {
   final bool required;
 }
 
+class _ContentSchema {
+  const _ContentSchema({required this.schema});
+
+  final Map<String, dynamic> schema;
+}
+
 class _ResponseSpec {
   const _ResponseSpec({required this.status, required this.schema});
 
@@ -371,11 +1029,15 @@ Future<int> importOpenApi({
   String? baseUrlOverride,
   bool generateTests = true,
   bool force = false,
+  bool allowRemoteReferences = false,
 }) async {
   final progress = logger.progress('Reading OpenAPI document');
   late final OpenApiDocument document;
   try {
-    document = parseOpenApi(await loadOpenApiSource(source));
+    document = await loadOpenApiDocument(
+      source,
+      allowRemoteReferences: allowRemoteReferences,
+    );
   } on OpenApiException catch (error) {
     progress.fail(error.message);
     return 1;
@@ -484,13 +1146,17 @@ Future<int> importOpenApi({
         stateManagement: config.stateManagement,
         baseUrl: baseUrlOverride ?? document.serverUrl,
       );
+      registerFeatureRoute(
+        root: root,
+        config: config,
+        projectName: projectName,
+        feature: feature,
+      );
       if (generateTests) {
         final testCode = await _writeOpenApiTests(
           root: root,
-          logger: logger,
           feature: feature,
           operations: specs,
-          force: force,
         );
         if (testCode != 0) {
           featureProgress.fail('Could not generate tests for "$feature".');
@@ -502,6 +1168,9 @@ Future<int> importOpenApi({
         'Generated "$feature" with ${specs.length} operation(s).',
       );
     } on OpenApiException catch (error) {
+      featureProgress.fail(error.message);
+      return 1;
+    } on RouteWiringException catch (error) {
       featureProgress.fail(error.message);
       return 1;
     } on FileSystemException catch (error) {
@@ -540,6 +1209,7 @@ void _makeOperationNamesUnique(List<OpenApiOperation> operations) {
       requestRequired: operation.requestRequired,
       responseSchema: operation.responseSchema,
       responseStatus: operation.responseStatus,
+      security: operation.security,
     );
   }
 }
@@ -626,8 +1296,9 @@ class _SchemaCompiler {
 
   _CompiledType _compile(Map<String, dynamic> raw, String preferredName) {
     final ref = raw[r'$ref'];
-    if (ref is String && _referenceNames.containsKey(ref)) {
-      final className = _referenceNames[ref]!;
+    final refKey = ref is String ? document.referenceKey(raw) : '';
+    if (refKey.isNotEmpty && _referenceNames.containsKey(refKey)) {
+      final className = _referenceNames[refKey]!;
       return _CompiledType(
         modelType: className,
         dtoType: '${className}Dto',
@@ -639,9 +1310,16 @@ class _SchemaCompiler {
     final type = schema['type'];
     final properties = _mapOrEmpty(schema['properties']);
     if (type == 'object' || properties.isNotEmpty) {
+      if (properties.isEmpty && schema.containsKey('additionalProperties')) {
+        return const _CompiledType(
+          modelType: 'Map<String, dynamic>',
+          dtoType: 'Map<String, dynamic>',
+          kind: _ValueKind.primitive,
+        );
+      }
       final name = pascalCase(preferredName);
       final className = name.isEmpty ? 'ApiModel' : name;
-      if (ref is String) _referenceNames[ref] = className;
+      if (refKey.isNotEmpty) _referenceNames[refKey] = className;
       if (!_classes.containsKey(className)) {
         final target = _ApiClass(className, []);
         _classes[className] = target;
@@ -699,25 +1377,89 @@ class _SchemaCompiler {
   Map<String, dynamic> _normalizeSchema(Map<String, dynamic> raw) {
     var resolved = document.resolve(raw);
     final compositions = _listOrEmpty(resolved['allOf']);
-    if (compositions.isEmpty) return resolved;
-    final merged = <String, dynamic>{...resolved}..remove('allOf');
-    final properties = <String, dynamic>{};
-    final required = <String>{};
-    for (final part in compositions) {
-      if (part is! Map<String, dynamic>) continue;
-      final normalized = _normalizeSchema(part);
-      properties.addAll(_mapOrEmpty(normalized['properties']));
-      required.addAll(_listOrEmpty(normalized['required']).whereType<String>());
-      for (final entry in normalized.entries) {
-        if (entry.key != 'properties' && entry.key != 'required') {
-          merged.putIfAbsent(entry.key, () => entry.value);
+    if (compositions.isNotEmpty) {
+      final merged = <String, dynamic>{...resolved}..remove('allOf');
+      final properties = <String, dynamic>{};
+      final required = <String>{};
+      for (final part in compositions) {
+        if (part is! Map<String, dynamic>) continue;
+        final normalized = _normalizeSchema(part);
+        properties.addAll(_mapOrEmpty(normalized['properties']));
+        required.addAll(
+          _listOrEmpty(normalized['required']).whereType<String>(),
+        );
+        for (final entry in normalized.entries) {
+          if (entry.key != 'properties' && entry.key != 'required') {
+            merged.putIfAbsent(entry.key, () => entry.value);
+          }
         }
       }
+      properties.addAll(_mapOrEmpty(merged['properties']));
+      required.addAll(_listOrEmpty(merged['required']).whereType<String>());
+      if (properties.isNotEmpty) merged['properties'] = properties;
+      if (required.isNotEmpty) merged['required'] = required.toList();
+      resolved = merged;
     }
-    properties.addAll(_mapOrEmpty(merged['properties']));
-    required.addAll(_listOrEmpty(merged['required']).whereType<String>());
-    if (properties.isNotEmpty) merged['properties'] = properties;
-    if (required.isNotEmpty) merged['required'] = required.toList();
+
+    final unionKey = _listOrEmpty(resolved['oneOf']).isNotEmpty
+        ? 'oneOf'
+        : _listOrEmpty(resolved['anyOf']).isNotEmpty
+            ? 'anyOf'
+            : null;
+    if (unionKey == null) return resolved;
+    final variants = _listOrEmpty(resolved[unionKey])
+        .whereType<Map<String, dynamic>>()
+        .map(_normalizeSchema)
+        .toList();
+    if (variants.isEmpty) return resolved;
+    final objectVariants = variants
+        .where(
+          (variant) =>
+              variant['type'] == 'object' ||
+              _mapOrEmpty(variant['properties']).isNotEmpty,
+        )
+        .toList();
+    if (objectVariants.length == variants.length) {
+      final merged = <String, dynamic>{...resolved}
+        ..remove('oneOf')
+        ..remove('anyOf')
+        ..['type'] = 'object';
+      final properties = <String, dynamic>{};
+      Set<String>? requiredIntersection;
+      for (final variant in objectVariants) {
+        for (final property in _mapOrEmpty(variant['properties']).entries) {
+          final existing = properties[property.key];
+          if (existing != null &&
+              !_equivalentSchema(existing, property.value)) {
+            throw OpenApiException(
+              'OpenAPI $unionKey variants define incompatible schemas for '
+              'property "${property.key}". ForgeKit will not choose one '
+              'variant silently.',
+            );
+          }
+          properties[property.key] = property.value;
+        }
+        final required =
+            _listOrEmpty(variant['required']).whereType<String>().toSet();
+        requiredIntersection = requiredIntersection == null
+            ? required
+            : requiredIntersection.intersection(required);
+      }
+      properties.addAll(_mapOrEmpty(merged['properties']));
+      merged['properties'] = properties;
+      if (requiredIntersection?.isNotEmpty == true) {
+        merged['required'] = requiredIntersection!.toList();
+      }
+      return merged;
+    }
+    final types = variants
+        .map((variant) => _effectiveSchemaType(variant))
+        .whereType<String>()
+        .toSet();
+    final merged = <String, dynamic>{...resolved}
+      ..remove('oneOf')
+      ..remove('anyOf');
+    if (types.length == 1) merged['type'] = types.single;
     return merged;
   }
 
@@ -759,8 +1501,31 @@ class _SchemaCompiler {
   }
 }
 
+bool _containsJsonSchemaId(Object? value) {
+  if (value is Map<String, dynamic>) {
+    if (value.containsKey(r'$id')) return true;
+    return value.values.any(_containsJsonSchemaId);
+  }
+  if (value is List) return value.any(_containsJsonSchemaId);
+  return false;
+}
+
+bool _equivalentSchema(Object? first, Object? second) =>
+    jsonEncode(_canonicalJson(first)) == jsonEncode(_canonicalJson(second));
+
+Object? _canonicalJson(Object? value) {
+  if (value is Map) {
+    final keys = value.keys.map((key) => key.toString()).toList()..sort();
+    return <String, Object?>{
+      for (final key in keys) key: _canonicalJson(value[key]),
+    };
+  }
+  if (value is List) return value.map(_canonicalJson).toList();
+  return value;
+}
+
 String _primitiveType(Map<String, dynamic> schema) {
-  return switch (schema['type']) {
+  return switch (_effectiveSchemaType(schema)) {
     'integer' => 'int',
     'number' => 'double',
     'boolean' => 'bool',
@@ -771,6 +1536,33 @@ String _primitiveType(Map<String, dynamic> schema) {
     _ => 'dynamic',
   };
 }
+
+String? _effectiveSchemaType(Map<String, dynamic> schema) {
+  final type = schema['type'];
+  if (type is String) return type;
+  if (type is List) {
+    return type.whereType<String>().firstWhere(
+          (value) => value != 'null',
+          orElse: () => 'null',
+        );
+  }
+  final values = _listOrEmpty(schema['enum']);
+  if (values.isEmpty && schema.containsKey('const')) {
+    return _typeForJsonValue(schema['const']);
+  }
+  final inferred = values.map(_typeForJsonValue).whereType<String>().toSet();
+  return inferred.length == 1 ? inferred.single : null;
+}
+
+String? _typeForJsonValue(Object? value) => switch (value) {
+      String() => 'string',
+      int() => 'integer',
+      double() => 'number',
+      bool() => 'boolean',
+      List() => 'array',
+      Map() => 'object',
+      _ => null,
+    };
 
 bool _isNullable(Map<String, dynamic> schema) {
   if (schema['nullable'] == true) return true;
@@ -866,6 +1658,7 @@ class _InputField {
     required this.type,
     required this.required,
     required this.location,
+    required this.isSecurity,
   });
 
   final String apiName;
@@ -873,6 +1666,7 @@ class _InputField {
   final String type;
   final bool required;
   final String location;
+  final bool isSecurity;
 }
 
 class _OperationSpec {
@@ -942,8 +1736,17 @@ _OperationSpec _buildOperation(
       type: _optionalType(type, parameter.required),
       required: parameter.required,
       location: parameter.location,
+      isSecurity: false,
     );
   }).toList();
+  final existingInputs = {
+    for (final input in inputs) '${input.location}:${input.apiName}',
+  };
+  for (final input in _securityInputs(document, operation, usedNames)) {
+    if (existingInputs.add('${input.location}:${input.apiName}')) {
+      inputs.add(input);
+    }
+  }
   final bodyName = usedNames.contains('payload') ? 'body' : 'payload';
   final bodyField = request == null
       ? null
@@ -953,6 +1756,7 @@ _OperationSpec _buildOperation(
           type: _optionalType(request.modelType, operation.requestRequired),
           required: operation.requestRequired,
           location: 'body',
+          isSecurity: false,
         );
   return _OperationSpec(
     operation: operation,
@@ -964,6 +1768,98 @@ _OperationSpec _buildOperation(
     inputs: inputs,
     bodyField: bodyField,
   );
+}
+
+List<_InputField> _securityInputs(
+  OpenApiDocument document,
+  OpenApiOperation operation,
+  Set<String> usedNames,
+) {
+  if (operation.security.isEmpty ||
+      operation.security.any((requirement) => requirement.allowsAnonymous)) {
+    // An empty alternative makes authentication optional, but optional
+    // credential inputs are still useful for callers that authenticate.
+  }
+  final referenced = operation.security
+      .expand((requirement) => requirement.schemes.keys)
+      .toSet();
+  final schemes = referenced
+      .map((name) => document.securitySchemes[name])
+      .whereType<OpenApiSecurityScheme>()
+      .toList();
+  final inputs = <_InputField>[];
+
+  final authorizationSchemes = schemes
+      .where(
+        (scheme) =>
+            scheme.type == OpenApiSecurityType.http ||
+            scheme.type == OpenApiSecurityType.oauth2 ||
+            scheme.type == OpenApiSecurityType.openIdConnect,
+      )
+      .toList();
+  if (authorizationSchemes.isNotEmpty) {
+    final required = _securityChannelRequired(
+      operation.security,
+      authorizationSchemes.map((scheme) => scheme.name).toSet(),
+    );
+    inputs.add(
+      _InputField(
+        apiName: 'Authorization',
+        dartName: _uniqueInputName('authorization', usedNames),
+        type: _optionalType('String', required),
+        required: required,
+        location: 'header',
+        isSecurity: true,
+      ),
+    );
+  }
+
+  for (final scheme in schemes.where(
+    (scheme) => scheme.type == OpenApiSecurityType.apiKey,
+  )) {
+    final parameterName = scheme.parameterName!;
+    final location = scheme.location!;
+    final required = _securityChannelRequired(
+      operation.security,
+      {scheme.name},
+    );
+    final baseName = location == 'cookie'
+        ? '${camelCase(scheme.name)}Cookie'
+        : camelCase(scheme.name);
+    inputs.add(
+      _InputField(
+        apiName: parameterName,
+        dartName: _uniqueInputName(baseName, usedNames),
+        type: _optionalType('String', required),
+        required: required,
+        location: location,
+        isSecurity: true,
+      ),
+    );
+  }
+  return inputs;
+}
+
+bool _securityChannelRequired(
+  List<OpenApiSecurityRequirement> requirements,
+  Set<String> acceptedSchemes,
+) {
+  if (requirements.isEmpty ||
+      requirements.any((requirement) => requirement.allowsAnonymous)) {
+    return false;
+  }
+  return requirements.every(
+    (requirement) => requirement.schemes.keys.any(acceptedSchemes.contains),
+  );
+}
+
+String _uniqueInputName(String preferred, Set<String> usedNames) {
+  var candidate = _safeIdentifier(preferred.isEmpty ? 'credential' : preferred);
+  var suffix = 2;
+  while (!usedNames.add(candidate)) {
+    candidate = '$preferred${suffix++}';
+  }
+  return candidate;
 }
 
 void _writeApiFeature({
@@ -985,7 +1881,12 @@ void _writeApiFeature({
           'model',
           '${operation.snake}_response.dart',
         ),
-        _emitModels(operation.response.classes),
+        _emitModels(
+          operation.response.classes,
+          dtoImport:
+              'package:$projectName/features/$feature/data/remote/dto/${operation.snake}_response_dto.dart',
+          withToDto: true,
+        ),
       );
       _writeGenerated(
         p.join(
@@ -1031,6 +1932,9 @@ void _writeApiFeature({
         _emitDtos(
           operation.request!.classes,
           partName: '${operation.snake}_payload_dto',
+          modelImport:
+              'package:$projectName/features/$feature/domain/entity/payload/${operation.snake}_payload.dart',
+          withToModel: true,
         ),
       );
     }
@@ -1263,6 +2167,12 @@ String _emitParams(
   ];
   out.writeln('class ${operation.paramsType} {');
   for (final field in fields) {
+    if (field.isSecurity) {
+      out.writeln(
+        '  /// Runtime credential for the OpenAPI `${field.apiName}` input. '
+        'Never hardcode it in generated source.',
+      );
+    }
     out.writeln('  final ${field.type} ${field.dartName};');
   }
   out
@@ -1355,7 +2265,7 @@ String _emitApiService({
     ..writeln()
     ..writeln(
       baseUrl?.trim().isNotEmpty == true
-          ? "@RestApi(baseUrl: '${_escape(baseUrl!.trim())}')"
+          ? "@RestApi(baseUrl: '${_escape(encodeRetrofitUrlLiteral(baseUrl!.trim()))}')"
           : '@RestApi()',
     )
     ..writeln('abstract class ${featurePascal}ApiService {')
@@ -1368,11 +2278,22 @@ String _emitApiService({
     if (operation.operation.summary?.trim().isNotEmpty == true) {
       out.writeln('  /// ${_docText(operation.operation.summary!)}');
     }
+    if (operation.operation.security.isNotEmpty) {
+      final metadata = jsonEncode([
+        for (final requirement in operation.operation.security)
+          requirement.schemes,
+      ]);
+      out.writeln(
+        "  @Extra({'forgekit.security': '${_escape(metadata)}'})",
+      );
+    }
     out.writeln(
-      "  @${operation.operation.method}('${_escape(operation.operation.path)}')",
+      "  @${operation.operation.method}('${_escape(encodeRetrofitUrlLiteral(operation.operation.path))}')",
     );
     final apiInputs = <String>[];
-    for (final input in operation.inputs) {
+    for (final input in operation.inputs.where(
+      (input) => input.location != 'cookie',
+    )) {
       final annotation = switch (input.location) {
         'path' => 'Path',
         'header' => 'Header',
@@ -1381,6 +2302,9 @@ String _emitApiService({
       apiInputs.add(
         "@$annotation('${_escape(input.apiName)}') ${input.type} ${input.dartName}",
       );
+    }
+    if (operation.inputs.any((input) => input.location == 'cookie')) {
+      apiInputs.add("@Header('Cookie') String? forgekitCookieHeader");
     }
     final body = operation.bodyField;
     if (body != null) {
@@ -1476,7 +2400,12 @@ String _emitRepositoryImpl({
     final parameter =
         operation.hasParams ? '${operation.paramsType} params' : '';
     final arguments = <String>[
-      for (final input in operation.inputs) 'params.${input.dartName}',
+      for (final input in operation.inputs.where(
+        (input) => input.location != 'cookie',
+      ))
+        'params.${input.dartName}',
+      if (operation.inputs.any((input) => input.location == 'cookie'))
+        _cookieHeaderExpression(operation.inputs),
       if (operation.bodyField != null)
         _requestMapping(
           'params.${operation.bodyField!.dartName}',
@@ -1509,6 +2438,29 @@ String _emitRepositoryImpl({
   out
     ..writeln('}')
     ..writeln();
+  return out.toString();
+}
+
+String _cookieHeaderExpression(List<_InputField> inputs) {
+  final cookies = inputs.where((input) => input.location == 'cookie').toList();
+  final out = StringBuffer('(() {\n')
+    ..writeln('        final values = <String>[');
+  for (final cookie in cookies) {
+    final value = 'params.${cookie.dartName}';
+    if (cookie.required) {
+      out.writeln(
+        "          '${_escape(cookie.apiName)}=\${Uri.encodeComponent($value.toString())}',",
+      );
+    } else {
+      out.writeln(
+        "          if ($value != null) '${_escape(cookie.apiName)}=\${Uri.encodeComponent($value.toString())}',",
+      );
+    }
+  }
+  out
+    ..writeln('        ];')
+    ..writeln("        return values.isEmpty ? null : values.join('; ');")
+    ..write('      })()');
   return out.toString();
 }
 
@@ -1784,27 +2736,10 @@ void _emitManagerOperation(
 
 Future<int> _writeOpenApiTests({
   required Directory root,
-  required Logger logger,
   required String feature,
   required List<_OperationSpec> operations,
-  required bool force,
 }) async {
-  var code = await addFeatureTests(
-    feature: feature,
-    logger: logger,
-    root: root,
-    force: force,
-  );
-  if (code != 0) return code;
   for (final operation in operations) {
-    code = await addFunctionTest(
-      feature: feature,
-      functionName: operation.snake,
-      logger: logger,
-      root: root,
-      force: force,
-    );
-    if (code != 0) return code;
     if (operation.response.hasClasses) {
       _writeSerializationTest(
         root: root,
@@ -1843,6 +2778,7 @@ void _writeSerializationTest({
   }
   if (sample is! Map) return;
   final encoded = jsonEncode(sample);
+  final encodedLiteral = _dartStringLiteral(encoded);
   final content = """
 import 'dart:convert';
 
@@ -1851,10 +2787,12 @@ import 'package:$projectName/features/$feature/data/remote/dto/${operation.snake
 
 void main() {
   test('$rootClass DTO serializes an OpenAPI-shaped value', () {
-    final json = jsonDecode(r'''$encoded''') as Map<String, dynamic>;
+    final json = jsonDecode($encodedLiteral) as Map<String, dynamic>;
     final dto = ${rootClass}Dto.fromJson(json);
+    final model = dto.toModel();
 
     expect(dto.toJson(), isA<Map<String, dynamic>>());
+    expect(model.toDto().toJson(), isA<Map<String, dynamic>>());
   });
 }
 """;
@@ -1873,7 +2811,15 @@ void main() {
   );
 }
 
-String _escape(String value) =>
-    value.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
+String _escape(String value) => value
+    .replaceAll(r'\', r'\\')
+    .replaceAll("'", r"\'")
+    .replaceAll(r'$', r'\$')
+    .replaceAll('\r', r'\r')
+    .replaceAll('\n', r'\n')
+    .replaceAll('\t', r'\t');
+
+String _dartStringLiteral(String value) =>
+    jsonEncode(value).replaceAll(r'$', r'\$');
 
 String _docText(String value) => value.replaceAll(RegExp(r'\s+'), ' ').trim();

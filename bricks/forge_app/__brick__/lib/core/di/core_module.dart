@@ -1,4 +1,3 @@
-import 'package:awesome_dio_interceptor/awesome_dio_interceptor.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:injectable/injectable.dart';
@@ -26,9 +25,10 @@ abstract class CoreModule {
       ),
     );
 
-    dio.interceptors.add(AwesomeDioInterceptor());
-
-    // TODO: add a 401/token-refresh interceptor here.
+    // Add application-owned authentication, redacted debug logging, retry, and
+    // token-refresh interceptors here. ForgeKit deliberately does not install a
+    // body/header logger because generated release builds must not disclose
+    // credentials or private API payloads by default.
 
     return dio;
   }

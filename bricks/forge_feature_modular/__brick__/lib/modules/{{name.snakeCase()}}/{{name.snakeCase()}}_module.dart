@@ -15,6 +15,8 @@ final {{name.camelCase()}}Module = createModule(
       ..addLazySingleton<{{name.pascalCase()}}Repository>(
         {{name.pascalCase()}}Repository.new,
       )
-      ..route('/', child: (_, __) => const {{name.pascalCase()}}Page());
+      ..route('/', child: (_, _) => const {{name.pascalCase()}}Page())
+      // forgekit:routes
+      ;
   },
 );

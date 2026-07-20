@@ -4,7 +4,9 @@ import 'package:{{projectName}}/features/{{name.snakeCase()}}/presentation/scree
 
 /// go_router routes for the {{name.pascalCase()}} feature.
 ///
-/// Register these in your central AppRouter by spreading the list, e.g.:
+/// The `forgekit add feature` command registers this list in the central
+/// GoRouter. If this brick is rendered directly with Mason, integrate it by
+/// spreading the list, for example:
 ///
 ///   final router = GoRouter(
 ///     routes: [
@@ -21,5 +23,6 @@ final List<RouteBase> {{name.camelCase()}}Routes = [
     name: {{name.pascalCase()}}Screen.id,
     builder: (context, state) => const {{name.pascalCase()}}Screen(),
   ),
+  // forgekit:feature-routes
 ];
 {{/useRouter}}

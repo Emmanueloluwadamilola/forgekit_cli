@@ -6,6 +6,8 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml_edit/yaml_edit.dart';
 
+import 'utils.dart';
+
 const _bricks = <String, String>{
   'forge_app': 'bricks/forge_app',
   'forge_app_mvvm': 'bricks/forge_app_mvvm',
@@ -60,9 +62,18 @@ Future<int> runSetup({Logger? logger}) async {
     final progress = log.progress('Registering ${entry.key}');
 
     final result = await Process.run(
-      'mason',
-      ['add', '-g', entry.key, '--path', brickPath],
-      runInShell: true,
+      'dart',
+      [
+        'pub',
+        'global',
+        'run',
+        'mason_cli:mason',
+        'add',
+        '-g',
+        entry.key,
+        '--path',
+        brickPath,
+      ],
     );
 
     if (result.exitCode != 0) {
@@ -176,7 +187,10 @@ Directory _masonGlobalDir() {
 Future<void> _removeForgekitEntriesFromYaml(File file) async {
   if (!file.existsSync()) return;
 
-  final editor = YamlEditor(await file.readAsString());
+  final contents = await file.readAsString();
+  if (contents.trim().isEmpty) return;
+
+  final editor = YamlEditor(contents);
   var changed = false;
 
   for (final brickName in _bricks.keys) {
@@ -199,7 +213,10 @@ Future<void> _removeForgekitEntriesFromJson(
 }) async {
   if (!file.existsSync()) return;
 
-  final decoded = json.decode(await file.readAsString());
+  final contents = await file.readAsString();
+  if (contents.trim().isEmpty) return;
+
+  final decoded = json.decode(contents);
   if (decoded is! Map<String, dynamic>) return;
 
   final target = nestedUnderBricks ? decoded['bricks'] : decoded;
@@ -239,18 +256,29 @@ Future<void> _replaceDirectory(Directory source, Directory destination) async {
 
 Future<bool> _ensureMason(Logger log) async {
   final existing = await Process.run(
-    'mason',
-    ['--version'],
-    runInShell: true,
+    'dart',
+    ['pub', 'global', 'run', 'mason_cli:mason', '--version'],
   );
 
-  if (existing.exitCode == 0) return true;
+  if (existing.exitCode == 0 &&
+      existing.stdout.toString().contains(
+            'mason_cli $supportedMasonCliVersion',
+          )) {
+    return true;
+  }
 
-  final progress = log.progress('Installing Mason CLI');
+  final progress = log.progress(
+    'Installing Mason CLI $supportedMasonCliVersion',
+  );
   final install = await Process.run(
     'dart',
-    ['pub', 'global', 'activate', 'mason_cli'],
-    runInShell: true,
+    [
+      'pub',
+      'global',
+      'activate',
+      'mason_cli',
+      supportedMasonCliVersion,
+    ],
   );
 
   if (install.exitCode != 0) {
@@ -259,18 +287,25 @@ Future<bool> _ensureMason(Logger log) async {
     return false;
   }
 
-  progress.complete('Installed Mason CLI');
+  progress.complete('Installed Mason CLI $supportedMasonCliVersion');
 
   final check = await Process.run(
-    'mason',
-    ['--version'],
-    runInShell: true,
+    'dart',
+    ['pub', 'global', 'run', 'mason_cli:mason', '--version'],
   );
 
-  if (check.exitCode == 0) return true;
+  if (check.exitCode == 0 &&
+      check.stdout.toString().contains(
+            'mason_cli $supportedMasonCliVersion',
+          )) {
+    return true;
+  }
 
-  log.err('Mason was installed, but the "mason" command is not on your PATH.');
-  log.info('Add ~/.pub-cache/bin to your PATH, then run: forgekit setup');
+  log.err(
+    'Mason CLI $supportedMasonCliVersion was activated, but that exact '
+    'version could not be executed through Dart Pub.',
+  );
+  log.info('Verify the Dart SDK installation, then run: forgekit setup');
   return false;
 }
 

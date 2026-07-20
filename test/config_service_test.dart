@@ -14,8 +14,8 @@ void main() {
         stateManagement: 'riverpod',
         router: 'modular',
         dependencyInjection: 'flutter_modular',
-        models: 'freezed',
-        apiClient: 'dio',
+        models: 'json_serializable',
+        apiClient: 'retrofit',
         minimumCoverage: 90,
         format: false,
         runBuildRunner: false,
@@ -66,6 +66,77 @@ state_management: forgekit
       expect(config.runBuildRunner, isFalse);
       expect(config.minimumCoverage, 95);
     });
+
+    test('rejects recognized but unsupported generation backends', () {
+      expect(
+        () => ForgeKitConfig.fromYaml('''
+version: 1
+models: freezed
+'''),
+        throwsA(
+          isA<ConfigException>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('models "freezed" is recognized'),
+              contains('refuses this configuration'),
+            ),
+          ),
+        ),
+      );
+      expect(
+        () => ForgeKitConfig.fromYaml('''
+version: 1
+api_client: dio
+'''),
+        throwsA(
+          isA<ConfigException>().having(
+            (error) => error.message,
+            'message',
+            contains('api_client "dio" is recognized'),
+          ),
+        ),
+      );
+      expect(
+        () => ForgeKitConfig.fromYaml('''
+version: 1
+dependency_injection: get_it
+'''),
+        throwsA(
+          isA<ConfigException>().having(
+            (error) => error.message,
+            'message',
+            contains('dependency_injection "get_it" is recognized'),
+          ),
+        ),
+      );
+    });
+
+    test('enforces architecture backend compatibility', () {
+      expect(
+        () => const ForgeKitConfig(
+          architecture: 'modular',
+          router: 'modular',
+        ).validate(),
+        throwsA(
+          isA<ConfigException>().having(
+            (error) => error.message,
+            'message',
+            contains('requires dependency_injection "flutter_modular"'),
+          ),
+        ),
+      );
+      expect(
+        () => const ForgeKitConfig(router: 'modular').validate(),
+        throwsA(
+          isA<ConfigException>().having(
+            (error) => error.message,
+            'message',
+            contains('requires architecture "modular"'),
+          ),
+        ),
+      );
+    });
   });
 
   group('detectForgeKitConfig', () {
@@ -94,7 +165,9 @@ dependencies:
 
       expect(config.stateManagement, 'riverpod');
       expect(config.router, 'go_router');
-      expect(config.dependencyInjection, 'riverpod');
+      expect(config.dependencyInjection, 'injectable');
+      expect(config.models, 'json_serializable');
+      expect(config.apiClient, 'retrofit');
     });
 
     test('distinguishes Bloc from Cubit source', () {
@@ -169,6 +242,70 @@ dependencies:
       ]),
       1,
     );
+  });
+
+  test('create app accepts comma-separated non-interactive platforms', () {
+    final runner = ForgeCommandRunner(logger: Logger(level: Level.quiet));
+
+    final results = runner.parse([
+      'create',
+      'app',
+      'sample_app',
+      '--architecture',
+      'clean',
+      '--state-management',
+      'provider',
+      '--router',
+      'named',
+      '--platforms',
+      'android,web',
+    ]);
+    final appResults = results.command!.command!;
+
+    expect(appResults['platforms'], ['android', 'web']);
+    expect(appResults.wasParsed('platforms'), isTrue);
+  });
+
+  test('create app rejects paths and existing destinations before generation',
+      () async {
+    final root = Directory.systemTemp.createTempSync('forgekit_create_guard_');
+    final original = Directory.current;
+    Directory.current = root;
+    try {
+      final runner = ForgeCommandRunner(logger: Logger(level: Level.quiet));
+      final options = [
+        '--architecture',
+        'clean',
+        '--state-management',
+        'provider',
+        '--router',
+        'named',
+        '--platforms',
+        'web',
+      ];
+
+      expect(await runner.run(['create', 'app', '../escape', ...options]), 1);
+      expect(
+        await runner.run([
+          'create',
+          'app',
+          'unsafe_org_app',
+          ...options,
+          '--org',
+          'com.example&whoami',
+        ]),
+        1,
+      );
+
+      Directory(p.join(root.path, 'existing_app')).createSync();
+      expect(
+        await runner.run(['create', 'app', 'existing_app', ...options]),
+        1,
+      );
+    } finally {
+      Directory.current = original;
+      root.deleteSync(recursive: true);
+    }
   });
 
   test('init supports dry-run without leaving forgekit.yaml behind', () async {

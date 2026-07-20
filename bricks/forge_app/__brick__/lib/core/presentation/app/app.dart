@@ -13,6 +13,7 @@ import '../../di/core_module_container.dart';
 {{/useCubit}}
 import '../manager/theme_provider.dart';
 import '../theme/app_theme.dart';
+// forgekit:route-imports
 
 {{#useProvider}}class App extends StatelessWidget {
   const App({super.key});
@@ -74,8 +75,7 @@ class _AppView extends StatelessWidget {
         path: '/',
         builder: (context, state) => const _Placeholder(),
       ),
-      // Register feature routes here, e.g.:
-      //   ...ordersRoutes,
+      // forgekit:go-routes
     ],
   );
 {{/useRouter}}
@@ -89,8 +89,8 @@ class _AppView extends StatelessWidget {
       themeMode: themeMode,
       initialRoute: '/',
       routes: {
-        // Register feature screens here.
         '/': (_) => const _Placeholder(),
+        // forgekit:named-routes
       },
     );
 {{/useRouter}}{{^useRouter}}    return MaterialApp.router(

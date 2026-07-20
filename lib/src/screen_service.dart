@@ -3,7 +3,10 @@ import 'dart:io';
 import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
+import 'route_wiring_service.dart';
+import 'utils.dart';
 
 /// Adds a screen (a `StatelessWidget` with a static route `id`) to an existing
 /// feature's `presentation/screens/` folder.
@@ -15,9 +18,22 @@ Future<int> addScreen({
   required Logger logger,
   required Directory root,
 }) async {
+  final config = loadForgeKitConfig(root: root);
+  final projectName = detectProjectName(root: root);
   final featureSnake = snakeCase(feature);
-  final featureDir =
-      Directory(p.join(root.path, 'lib', 'features', featureSnake));
+  final featureDir = Directory(
+    p.joinAll([
+      root.path,
+      'lib',
+      if (config.architecture == 'mvvm')
+        'ui'
+      else if (config.architecture == 'modular')
+        'modules'
+      else
+        'features',
+      featureSnake,
+    ]),
+  );
   if (!featureDir.existsSync()) {
     logger.err('Feature "$featureSnake" not found (looked for '
         '${featureDir.path}).');
@@ -38,7 +54,18 @@ Future<int> addScreen({
   );
 
   final file = File(
-    p.join(featureDir.path, 'presentation', 'screens', '${snake}_screen.dart'),
+    p.joinAll([
+      featureDir.path,
+      if (config.architecture == 'mvvm')
+        'widgets'
+      else if (config.architecture == 'modular')
+        'presentation'
+      else ...[
+        'presentation',
+        'screens',
+      ],
+      '${snake}_screen.dart',
+    ]),
   );
   if (file.existsSync()) {
     logger.err(
@@ -49,6 +76,8 @@ Future<int> addScreen({
 
   final progress = logger.progress('Adding screen "$className"');
   file.parent.createSync(recursive: true);
+  final routePath =
+      config.architecture == 'modular' ? '/$snake' : '/$featureSnake/$snake';
   file.writeAsStringSync('''
 import 'package:flutter/material.dart';
 
@@ -56,7 +85,7 @@ import 'package:flutter/material.dart';
 class $className extends StatelessWidget {
   const $className({super.key});
 
-  static const id = '/$snake';
+  static const id = '$routePath';
 
   @override
   Widget build(BuildContext context) {
@@ -68,15 +97,25 @@ class $className extends StatelessWidget {
   }
 }
 ''');
-  progress.complete('Added screen "$className".');
+  try {
+    registerScreenRoute(
+      root: root,
+      config: config,
+      projectName: projectName,
+      feature: featureSnake,
+      screenName: snake,
+    );
+  } on RouteWiringException catch (error) {
+    if (file.existsSync()) file.deleteSync();
+    progress.fail('Could not register the screen route.');
+    logger.err(error.message);
+    return 1;
+  }
 
+  progress.complete('Added and registered screen "$className".');
   logger
     ..info('')
     ..info('Created ${p.relative(file.path, from: root.path)}')
-    ..info('')
-    ..info('Register the route:')
-    ..info('  • Named routes — in core/presentation/app/app.dart `routes` map:')
-    ..info('      $className.id: (_) => const $className(),')
-    ..info('  • go_router — add a GoRoute for $className to your AppRouter.');
+    ..info('Registered route: $routePath');
   return 0;
 }

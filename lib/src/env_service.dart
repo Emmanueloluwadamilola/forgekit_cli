@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:yaml/yaml.dart';
 import 'package:yaml_edit/yaml_edit.dart';
 
+import 'config_service.dart';
 import 'json_to_dart.dart';
 
 Future<int> addEnvironments({
@@ -42,8 +43,12 @@ Future<int> addEnvironments({
       }
     }
 
+    final config = loadForgeKitConfig(root: root);
     final configFile = File(
-      p.join(root.path, 'lib', 'core', 'config', 'env_config.dart'),
+      p.joinAll([
+        root.path,
+        ..._configPath(config, 'env_config.dart'),
+      ]),
     );
     if (!configFile.existsSync()) {
       configFile.parent.createSync(recursive: true);
@@ -79,6 +84,12 @@ Future<int> addEnvironments({
   return 0;
 }
 
+List<String> _configPath(ForgeKitConfig config, String fileName) =>
+    switch (config.architecture) {
+      'mvvm' => ['lib', 'config', fileName],
+      _ => ['lib', 'core', 'config', fileName],
+    };
+
 Future<int> setEnvironmentValue({
   required String key,
   required String value,
@@ -86,11 +97,29 @@ Future<int> setEnvironmentValue({
   required Directory root,
   String? environment,
   bool all = false,
+  bool allowPublicValue = false,
 }) async {
   final normalizedKey = _normalizeKey(key);
   if (normalizedKey.isEmpty) {
     logger.err('An environment key is required.');
     return 1;
+  }
+  if (isPotentiallySensitiveEnvironmentKey(normalizedKey)) {
+    if (!allowPublicValue) {
+      logger.err(
+        '$normalizedKey looks like a secret or credential. ForgeKit refused '
+        'to write it to assets/env because bundled Flutter assets are public '
+        'client data. Use runtime authentication or a server-side secret '
+        'manager instead. If the provider explicitly documents this as a '
+        'publishable client key, review its restrictions and rerun with '
+        '--allow-public-value.',
+      );
+      return 1;
+    }
+    logger.warn(
+      '$normalizedKey was explicitly allowed as public client configuration. '
+      'It will be extractable from the shipped application.',
+    );
   }
   if (!all && (environment == null || environment.trim().isEmpty)) {
     logger.err('Pass --environment <name> or --all.');
@@ -136,6 +165,74 @@ Future<int> setEnvironmentValue({
   return 0;
 }
 
+/// Whether [key] resembles a credential that should not be bundled in an app.
+bool isPotentiallySensitiveEnvironmentKey(String key) {
+  final normalized = _normalizeKey(key);
+  if (normalized.isEmpty) return false;
+  const sensitiveTerms = <String>{
+    'API_KEY',
+    'API_SECRET',
+    'ACCESS_KEY',
+    'ACCESS_TOKEN',
+    'AUTH_TOKEN',
+    'CLIENT_SECRET',
+    'CREDENTIAL',
+    'CREDENTIALS',
+    'DATABASE_URL',
+    'PASSWORD',
+    'PASSCODE',
+    'PASSPHRASE',
+    'PRIVATE_KEY',
+    'REFRESH_TOKEN',
+    'SECRET',
+    'SECRET_KEY',
+    'SIGNING_KEY',
+    'TOKEN',
+  };
+  return sensitiveTerms.any(
+    (term) =>
+        normalized == term ||
+        normalized.startsWith('${term}_') ||
+        normalized.endsWith('_$term') ||
+        normalized.contains('_${term}_'),
+  );
+}
+
+/// Finds secret-like keys in generated environment assets without reading or
+/// reporting their values.
+Map<String, List<String>> findPotentiallySensitiveBundledEnvironmentKeys(
+  Directory root,
+) {
+  final envDir = Directory(p.join(root.path, 'assets', 'env'));
+  if (!envDir.existsSync()) return const {};
+
+  final findings = <String, List<String>>{};
+  final files = envDir
+      .listSync()
+      .whereType<File>()
+      .where((file) => p.extension(file.path).toLowerCase() == '.json')
+      .toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
+  for (final file in files) {
+    try {
+      final decoded = json.decode(file.readAsStringSync());
+      if (decoded is! Map<String, dynamic>) continue;
+      final keys = decoded.keys
+          .where(isPotentiallySensitiveEnvironmentKey)
+          .toSet()
+          .toList()
+        ..sort();
+      if (keys.isNotEmpty) {
+        findings[p.relative(file.path, from: root.path)] = keys;
+      }
+    } on FormatException {
+      // Environment syntax is validated by the env command. Security scanning
+      // remains value-blind and skips malformed files here.
+    }
+  }
+  return findings;
+}
+
 void _registerAssetDir(Directory root, String assetDir) {
   final pubspec = File(p.join(root.path, 'pubspec.yaml'));
   final editor = YamlEditor(pubspec.readAsStringSync());
@@ -178,6 +275,10 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
 
+/// Loads public, non-secret client configuration from bundled assets.
+///
+/// Values in `assets/env` are extractable from a shipped application. Keep
+/// credentials, private keys, and privileged API secrets on a trusted server.
 class EnvConfig {
   EnvConfig._();
 

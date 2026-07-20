@@ -1,18 +1,18 @@
 # Flutter ForgeKit CLI Architecture Standard
 
-This document is the **single source of truth** for how Flutter ForgeKit CLI apps are structured.
-Every generator (Mason brick, `forgekit` CLI, VSCode extension) produces code that conforms to
-this standard. It was distilled from a review of seven production apps: `pof_customer`,
-`pof_vendor`, `runnars_mobile`, `my-cross-river-app`, `tantita_mobile`, `airwifi_mobile`,
-and `the-lex-app-mobile`.
+This document is the **single source of truth** for how Flutter ForgeKit CLI
+apps are structured. Every generator (Mason brick, `forgekit` CLI, and a
+compatible editor integration) must produce code that conforms to this
+standard.
 
-> If a generator and this document disagree, this document wins. Update the document first,
-> then the generators.
+> If a generator and this document disagree, this document wins. Update the
+> document first, then the generators.
 
 ## Architecture profiles
 
-Flutter ForgeKit CLI supports three project-wide architecture profiles. The selected value
-is stored in `forgekit.yaml` and controls both app and feature generation.
+Flutter ForgeKit CLI supports three project-wide architecture profiles. The
+selected value is stored in `forgekit.yaml` and controls both app and feature
+generation.
 
 | Profile | Primary organization | Routing and dependency injection |
 | --- | --- | --- |
@@ -32,34 +32,33 @@ controller, state, and page; the root `appModule` is the composition map.
 | Concern            | Choice                                                              | Notes |
 |--------------------|--------------------------------------------------------------------|-------|
 | Architecture       | Clean Architecture, feature-first (default profile)                | data / domain / presentation inside each feature |
-| State management   | Provider, Riverpod, Bloc, or Cubit                                  | selected project-wide in `forgekit.yaml`; Provider uses the Flutter ForgeKit CLI `CustomProvider` base and every option uses an immutable paired `*State` object |
+| State management   | Provider, Riverpod, Bloc, or Cubit                                  | selected project-wide in `forgekit.yaml`; Provider uses the Flutter ForgeKit CLI `CustomProvider` base and every option generates a paired `*State` object |
 | Dependency injection | `get_it` + `injectable`                                          | one `@module` per feature, generated container |
-| Networking         | `dio` + `retrofit` + `awesome_dio_interceptor`                     | 401/token-refresh interceptor, `ApiResult<T>` wrapper |
+| Networking         | `dio` + `retrofit`                                                   | an `ApiResult<T>` wrapper; authentication, redacted debug logging, and token refresh remain application-owned |
 | Serialization      | `json_serializable` + `json_annotation`                            | no `freezed`; explicit DTO → domain conversion |
-| Routing            | Named routes + static `.id` on screens + navigation extension      | see §7; `go_router` is the documented modern alternative |
+| Routing            | GoRouter or named routes + static `.id` on screens                  | see §7; GoRouter is the interactive default for new Clean and MVVM apps |
 | Spacing            | `gap`                                                              | `Gap(16)` instead of `SizedBox` |
 | Responsive         | `flutter_screenutil` (optional per project)                        | `designSize: Size(360, 690)` |
 
 ### Locked dependency versions (baseline)
 
 ```yaml
-provider: ^6.1.2
-flutter_riverpod: ^2.6.1 # when the Riverpod profile is selected
-flutter_bloc: ^9.1.0     # when the Bloc or Cubit profile is selected
-get_it: ^8.0.3
-injectable: ^2.5.0
-dio: ^5.8.0
+provider: ^6.1.5
+flutter_riverpod: ^3.3.2 # when the Riverpod profile is selected
+flutter_bloc: ^9.1.1     # when the Bloc or Cubit profile is selected
+get_it: ^9.2.1
+injectable: ^3.0.0
+dio: ^5.10.0
 retrofit: ^4.9.2
-awesome_dio_interceptor: ^1.3.0
 json_annotation: ^4.12.0
 gap: ^3.0.1
-flutter_secure_storage: ^9.2.2
-shared_preferences: ^2.5.3 # when a SharedPreferences storage service is added
+flutter_secure_storage: ^10.3.1
+shared_preferences: ^2.5.5 # when a SharedPreferences storage service is added
 dartz: ^0.10.1            # optional, for Either-style error handling
 
 # dev
-build_runner: ^2.4.13
-injectable_generator: ^2.6.1
+build_runner: ^2.15.1
+injectable_generator: ^3.0.2
 retrofit_generator: ^10.2.6
 json_serializable: ^6.14.0
 ```
@@ -76,14 +75,14 @@ boundaries while replacing the presentation manager and widget bindings.
 lib/
 ├── core/
 │   ├── di/
-│   │   ├── core_module.dart                 # @module: Dio, SharedPreferences, SecureStorage
+│   │   ├── core_module.dart                 # @module: Dio and baseline secure storage
 │   │   ├── core_module_container.dart        # getIt + configureDependencies()
 │   │   └── core_module_container.config.dart # GENERATED
 │   ├── domain/
 │   │   ├── api/
 │   │   │   └── api_result.dart               # ApiResult<T> sealed wrapper
 │   │   └── usecase/
-│   │       └── use_case.dart                 # UseCase<Type, Params> base
+│   │       └── use_case.dart                 # UseCase<Output, Params> base
 │   └── presentation/
 │       ├── app/
 │       │   └── app.dart                      # root MaterialApp + routes
@@ -97,37 +96,35 @@ lib/
 │       │   └── colors/
 │       │       └── colors.dart               # color constants
 │       ├── resources/
-│       │   └── drawables.dart                # asset path constants
-│       ├── utils/
-│       │   ├── extensions/                   # navigation.dart, context_ext.dart, ...
-│       │   └── validators.dart
-│       └── widgets/                          # shared design-system widgets
+│       │   └── drawables.dart                # created by asset generation
+│       ├── utils/extensions/
+│       │   └── navigation.dart               # named-route navigation helpers
+│       └── widgets/                          # starter shared widgets
 │           ├── button.dart
-│           ├── input_field.dart
-│           ├── svg_image.dart
-│           ├── cached_image.dart
 │           ├── clickable.dart
-│           ├── empty_states.dart
-│           ├── shimmer_card.dart
-│           ├── pop_widget.dart
-│           └── provider_widget.dart
+│           └── svg_image.dart
 ├── features/
 │   └── <feature>/                            # see §3
-├── services/                                 # cross-cutting singletons (see §6)
-│   ├── notification_service.dart
-│   ├── local_notification_service.dart
-│   └── remote_config_service.dart
+├── services/                                 # generated cross-cutting singletons (see §6)
+│   ├── analytics_service.dart                # example generic initialized service
+│   ├── local_storage_service.dart            # optional SharedPreferences driver
+│   └── secure_storage_service.dart           # optional secure-storage driver
 └── main.dart
 ```
 
-**Decision locked:** services live in `lib/services/` (top-level), not `lib/core/services/`.
-This resolves the inconsistency found across the reviewed apps.
+**Decision locked:** services live in `lib/services/` (top-level), not
+`lib/core/services/`.
 
 ---
 
-## 3. Feature layout (the unit the `feature` brick generates)
+## 3. Complete Clean feature layout
 
-For a feature named `orders` (snake_case folder, PascalCase classes):
+The bare `add feature` command creates the API service, repository contract and
+implementation, presentation manager/state, primary screen, route integration,
+and DI module. Later `add function`, `add model`, `add usecase`, and `add widget`
+commands fill the corresponding folders. For a feature named `orders`, the
+resulting feature can grow into this structure (snake_case files and PascalCase
+classes):
 
 ```
 features/orders/
@@ -203,8 +200,8 @@ class Failure<T> extends ApiResult<T> {
 ### `core/domain/usecase/use_case.dart`
 
 ```dart
-abstract class UseCase<Type, Params> {
-  Future<ApiResult<Type>> call(Params params);
+abstract class UseCase<Output, Params> {
+  Future<ApiResult<Output>> call(Params params);
 }
 
 class NoParams {
@@ -252,7 +249,9 @@ class CustomState {
 }
 ```
 
-Feature `*State` classes extend `CustomState` and add `copyWith`.
+Provider feature state classes extend `CustomState` and add `copyWith`.
+Riverpod, Bloc, and Cubit generate manager-specific immutable state classes
+instead of inheriting from this Provider base.
 
 ---
 
@@ -276,24 +275,33 @@ Feature `*State` classes extend `CustomState` and add `copyWith`.
 
 ---
 
-## 6. Services (the `service` brick)
+## 6. Services
 
 A service is a cross-cutting singleton in `lib/services/`, registered in DI as a
-`@lazySingleton` or via the core module. Standard services the generator supports:
+`@lazySingleton` in Clean and MVVM projects or as one shared instance in the
+Flutter Modular composition root.
 
-- `notification_service` — Firebase Messaging
-- `local_notification_service` — flutter_local_notifications
-- `remote_config_service` — Firebase Remote Config / feature flags
-- `secure_storage_service` — flutter_secure_storage wrapper
-- `analytics_service` — analytics façade
-- `app_review_service` — in-app review
-- `deep_link_service` — link routing
+ForgeKit supports two service categories:
+
+- `generic` creates an initialized singleton skeleton for an application-owned
+  SDK adapter or cross-cutting concern. The developer implements the
+  service-specific behavior.
+- `shared_preferences` and `flutter_secure_storage` create complete,
+  driver-backed storage implementations.
+
+Names such as `analytics`, `notification`, `remote_config`, `app_review`, and
+`deep_link` currently use the generic generator. ForgeKit does not install or
+implement their third-party SDKs automatically.
 
 Each generated service:
 1. Creates `lib/services/<name>_service.dart` with an `init()` method.
 2. Registers it in DI (`@lazySingleton` annotation + re-run build_runner).
-3. Is initialized during app bootstrap when the generator supports automatic
-   initialization.
+3. Inserts an idempotent `init()` call after dependency configuration and
+   before `runApp`.
+
+Those integration guarantees apply to `forgekit add service`. Rendering the
+underlying Mason brick directly creates its local scaffold but bypasses
+ForgeKit's project-aware DI, bootstrap, and transaction orchestration.
 
 Storage services are first-class driver-backed generators:
 
@@ -304,23 +312,53 @@ forgekit add service secure_storage --driver flutter_secure_storage
 
 These commands add the package dependency, generate complete typed storage
 functions, register the service in Injectable/GetIt or Flutter Modular, and
-insert an idempotent `init()` call before `runApp`. Generic services generated
-without `--driver` remain application-specific and print their manual bootstrap
-step.
+insert an idempotent `init()` call before `runApp`.
+
+Storage security boundaries are contractual:
+
+- SharedPreferences is for non-sensitive preferences and cache-like settings;
+  the generated service uses `SharedPreferencesAsync` to avoid stale
+  process-local caches. It is not a credential store and its writes are not a
+  durable database guarantee.
+- Secure storage is for revocable runtime material such as session and refresh
+  tokens received after authentication. It does not make a static credential
+  safe to compile or bundle into the application.
+- Privileged API keys, signing keys, passwords, and backend credentials remain
+  server-side. ForgeKit environment assets are public client configuration.
+
+In an interactive terminal, omitting `--driver` asks the developer to choose
+between the generic and storage implementations. In automation, pass the
+driver explicitly. A generic service is fully registered and initialized, but
+its application-specific `init()` body remains intentionally unfinished.
 
 ---
 
 ## 7. Routing
 
-**Default (locked):** named routes. Each screen exposes `static const id = '/orders';`
-and is registered in `core/presentation/app/app.dart`'s `routes` map. A `navigation.dart`
-extension provides `context.pushNamed(id)`, `context.pushAndClear(id)`, `context.pop()`.
+Clean and MVVM projects choose either GoRouter or named routes during app
+creation. GoRouter is the interactive default; `--router named` and
+`--router go_router` make the choice explicit for scripts and CI. A project
+uses one central routing style consistently.
 
-The `feature` brick's post-gen hook inserts the route into the `routes` map automatically.
+Each primary feature screen exposes `static const id = '/orders';`. Additional
+Clean and MVVM screens use feature-qualified ids such as
+`/orders/order_detail` to avoid cross-feature collisions. Modular screen ids
+are module-relative child paths.
 
-**Modern alternative (documented option):** `go_router`. If `--router=go_router` is passed,
-the brick emits a `<feature>_routes.dart` with `GoRoute` entries and registers them in a
-central `AppRouter`. Choose one per project and stay consistent.
+ForgeKit registers routes automatically:
+
+- Named-route projects receive a screen import and entry in the central
+  `MaterialApp.routes` map.
+- GoRouter projects receive the feature route-list import and spread, or a
+  direct `GoRoute` for an additional screen.
+- Modular projects receive a child route in the generated feature module.
+
+This automatic integration is performed by the `forgekit` command. Direct
+Mason rendering bypasses project-aware route orchestration.
+
+Generated insertions carry ForgeKit ownership markers and are idempotent. If
+the configured insertion point cannot be found, generation fails and the
+project transaction restores the previous state.
 
 ---
 
@@ -330,8 +368,9 @@ central `AppRouter`. Choose one per project and stay consistent.
 - `configureDependencies()` (in `core_module_container.dart`) calls `getIt.init()`.
 - Each feature has a `@module` abstract class in `features/<feature>/di/<feature>_module.dart`
   that provides the retrofit `ApiService` and binds `RepositoryImpl` to `Repository`.
-- Use cases and providers are annotated `@injectable` / `@lazySingleton` so they are wired
-  automatically.
+- Use cases and Provider, Bloc, or Cubit managers are annotated for Injectable
+  so they are wired automatically. Riverpod notifiers are owned by Riverpod's
+  generated provider declarations instead of GetIt.
 - After any generation that touches DI, run: `dart run build_runner build`.
   The CLI/brick hooks do this for you (unless `--no-build-runner`).
 
@@ -353,8 +392,11 @@ central `AppRouter`. Choose one per project and stay consistent.
 
 Two project-wide choices are supported without forking the generators:
 
-1. **Routing** — `--router=named` (default) or `--router=go_router`.
+1. **Routing** — `--router=go_router` (interactive default) or
+   `--router=named` for Clean and MVVM; Flutter Modular owns routing in the
+   Modular profile.
 2. **State management** — Provider, Riverpod, Bloc, or Cubit.
 
-Dependency injection, networking, serialization, and the top-level `lib/services/`
-location remain consistent across all profiles.
+Clean and MVVM retain the Injectable/GetIt composition model; Modular retains
+Flutter Modular composition. Retrofit/JSON Serializable generation and the
+top-level `lib/services/` location remain consistent across profiles.

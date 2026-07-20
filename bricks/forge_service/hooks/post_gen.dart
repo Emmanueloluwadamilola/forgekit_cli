@@ -17,9 +17,14 @@ void run(HookContext context) {
   logger.info('');
   logger.success('${pascal}Service generated in lib/services/.');
   logger.info('');
-  logger.info('Next steps:');
   logger.info(
-    '  1. Add the init call to your main.dart bootstrap (after '
+    'When invoked through "forgekit add service", ForgeKit completes DI and '
+    'startup wiring after this brick finishes.',
+  );
+  logger.info('');
+  logger.info('Direct Mason use only:');
+  logger.info(
+    '  1. Add the init call to main.dart after '
     'configureDependencies()):',
   );
   logger.info('');
