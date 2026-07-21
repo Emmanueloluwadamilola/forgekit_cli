@@ -128,17 +128,19 @@ git --version
 ### Install from GitHub
 
 ```sh
-FORGEKIT_REF=replace_with_a_reviewed_40_character_commit_sha
+# Pinned to the reviewed v0.1.0 release tag
+FORGEKIT_REF=v0.1.0
 dart pub global activate --source git \
   https://github.com/Emmanueloluwadamilola/forgekit_cli.git \
   --git-ref "$FORGEKIT_REF"
 forgekit setup
 ```
 
-Replace the placeholder with the complete commit SHA reviewed by your team.
-This uses Dart Pub's `--git-ref` support to install that exact source revision
-instead of following a mutable branch. Record the revision in build and
-onboarding documentation until signed/versioned releases exist. See
+`FORGEKIT_REF` is pinned above to the `v0.1.0` release tag. This uses Dart Pub's
+`--git-ref` support to install that reviewed revision instead of following a
+mutable branch. For maximum immutability, teams can instead pin the full 40-
+character commit SHA that `v0.1.0` points to and record it in build and
+onboarding documentation. See
 [Dart's Git activation documentation](https://dart.dev/tools/pub/cmd/pub-global#activating-a-package-with-git).
 
 `forgekit setup` ensures the tested Mason CLI version (`0.1.3`) is active,
