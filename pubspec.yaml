@@ -5,6 +5,7 @@ description: >-
 version: 0.1.0
 publish_to: none
 repository: https://github.com/Emmanueloluwadamilola/forgekit_cli
+homepage: https://github.com/Emmanueloluwadamilola/forgekit_cli
 issue_tracker: https://github.com/Emmanueloluwadamilola/forgekit_cli/issues
 
 environment:

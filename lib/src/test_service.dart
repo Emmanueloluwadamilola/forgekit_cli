@@ -17,9 +17,20 @@ Future<int> addFeatureTests({
   final config = loadForgeKitConfig(root: root);
   final selectedStateManagement = stateManagement ?? config.stateManagement;
   final architecture = config.architecture;
+  if (!creatableArchitectureProfiles.contains(architecture)) {
+    logger.err(
+      'Feature test generation is not available for the '
+      '"$architecture" adoption profile.',
+    );
+    return 1;
+  }
   final projectName = detectProjectName(root: root);
   final featureSnake = snakeCase(feature);
   final featurePascal = pascalCase(featureSnake);
+  if (featureSnake.isEmpty || featurePascal.isEmpty) {
+    logger.err('A feature name is required.');
+    return 1;
+  }
   final testPath = switch (architecture) {
     'mvvm' => ['ui', featureSnake, 'view_models'],
     'modular' => ['modules', featureSnake, 'presentation'],
@@ -34,6 +45,24 @@ Future<int> addFeatureTests({
     'modular' => '${featureSnake}_controller_test.dart',
     _ => '${featureSnake}_provider_test.dart',
   };
+  final sourceDirectory = Directory(
+    p.joinAll([
+      root.path,
+      'lib',
+      if (architecture == 'mvvm')
+        'ui'
+      else if (architecture == 'modular')
+        'modules'
+      else
+        'features',
+      featureSnake,
+    ]),
+  );
+  if (!sourceDirectory.existsSync()) {
+    logger.err('Feature "$featureSnake" not found.');
+    logger.info('Create it first with: forgekit add feature $featureSnake');
+    return 1;
+  }
 
   final files = <String, String>{
     '${featureSnake}_state_test.dart': _featureStateTest(
@@ -81,9 +110,37 @@ Future<int> addModelTest({
   final modelSnake = snakeCase(name);
   final modelPascal = pascalCase(modelSnake);
   final featureSnake = feature == null ? null : snakeCase(feature);
+  if (modelSnake.isEmpty ||
+      !RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(modelPascal)) {
+    logger.err('The model name must generate a valid Dart type.');
+    return 1;
+  }
   final modelImport = featureSnake == null
       ? 'package:$projectName/core/domain/entity/model/$modelSnake.dart'
       : 'package:$projectName/features/$featureSnake/domain/entity/model/$modelSnake.dart';
+  final modelFile = File(
+    p.joinAll([
+      root.path,
+      'lib',
+      if (featureSnake == null) ...[
+        'core',
+      ] else ...[
+        'features',
+        featureSnake,
+      ],
+      'domain',
+      'entity',
+      'model',
+      '$modelSnake.dart',
+    ]),
+  );
+  if (!modelFile.existsSync()) {
+    logger.err(
+      'Model "$modelSnake" not found (looked for '
+      '${p.relative(modelFile.path, from: root.path)}).',
+    );
+    return 1;
+  }
   final testPathParts = [
     root.path,
     'test',
@@ -130,7 +187,33 @@ Future<int> addFunctionTest({
   final featureSnake = snakeCase(feature);
   final functionSnake = snakeCase(functionName);
   final functionPascal = pascalCase(functionSnake);
+  if (featureSnake.isEmpty ||
+      functionSnake.isEmpty ||
+      !RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(functionPascal)) {
+    logger.err(
+      'Feature and function names must generate valid Dart identifiers.',
+    );
+    return 1;
+  }
   final usecaseClass = '${functionPascal}Usecase';
+  final usecaseFile = File(
+    p.join(
+      root.path,
+      'lib',
+      'features',
+      featureSnake,
+      'domain',
+      'usecase',
+      '${functionSnake}_usecase.dart',
+    ),
+  );
+  if (!usecaseFile.existsSync()) {
+    logger.err(
+      'Function "$functionSnake" not found (looked for '
+      '${p.relative(usecaseFile.path, from: root.path)}).',
+    );
+    return 1;
+  }
   final testDir = Directory(
     p.join(root.path, 'test', 'features', featureSnake, 'domain', 'usecase'),
   );

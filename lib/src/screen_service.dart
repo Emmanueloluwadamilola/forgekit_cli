@@ -19,6 +19,13 @@ Future<int> addScreen({
   required Directory root,
 }) async {
   final config = loadForgeKitConfig(root: root);
+  if (!creatableArchitectureProfiles.contains(config.architecture)) {
+    logger.err(
+      'Screen generation is not available for the '
+      '"${config.architecture}" adoption profile.',
+    );
+    return 1;
+  }
   final projectName = detectProjectName(root: root);
   final featureSnake = snakeCase(feature);
   final featureDir = Directory(
@@ -48,6 +55,13 @@ Future<int> addScreen({
   }
   final snake = snakeCase(pascal);
   final className = '${pascal}Screen';
+  if (pascal.isEmpty || !RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(pascal)) {
+    logger.err(
+      'Use a screen name whose generated Dart type starts with a letter and '
+      'contains only letters or digits.',
+    );
+    return 1;
+  }
   final title = pascal.replaceAllMapped(
     RegExp(r'([a-z])([A-Z])'),
     (m) => '${m[1]} ${m[2]}',

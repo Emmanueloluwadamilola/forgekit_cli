@@ -134,8 +134,8 @@ class _SetEnvCommand extends Command<int> {
   String get description => 'Set an environment config value.';
 
   @override
-  String get invocation =>
-      'forgekit set env <KEY> <VALUE> --environment <name> '
+  String get invocation => 'forgekit set env <KEY> <VALUE> '
+      '(--environment <name>|--all) '
       '[--allow-public-value]';
 
   @override

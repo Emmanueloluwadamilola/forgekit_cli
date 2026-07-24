@@ -45,8 +45,10 @@ Future<int> runDoctor({
       _checkMvvmProject(root, issues, config.stateManagement);
     case 'modular':
       _checkModularProject(root, issues);
-    default:
+    case 'clean':
       _checkCleanProject(root, issues, config.stateManagement);
+    default:
+      _checkAdoptionOnlyProject(root, issues, config.architecture);
   }
   _checkBundledEnvironmentKeys(root, issues);
 
@@ -92,7 +94,7 @@ Future<int> _applyFixes({
   required String stateManagement,
   required String architecture,
 }) async {
-  if (architecture == 'mvvm' || architecture == 'modular') {
+  if (architecture != 'clean') {
     logger.info(
       'No safe automatic repairs are available for the $architecture profile.',
     );
@@ -146,6 +148,21 @@ Future<int> _applyFixes({
     logger.info('No safe fixes were needed.');
   }
   return fixed;
+}
+
+void _checkAdoptionOnlyProject(
+  Directory root,
+  List<_Issue> issues,
+  String architecture,
+) {
+  _checkFiles(root, issues, ['lib/main.dart']);
+  issues.add(
+    _Issue.error(
+      'The "$architecture" profile is detection-only in ForgeKit 0.1.0. '
+      'Architecture generation and automatic repair require a Clean, MVVM, or '
+      'Modular project.',
+    ),
+  );
 }
 
 void _checkCleanProject(

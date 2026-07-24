@@ -65,6 +65,13 @@ class InitCommand extends Command<int> {
         ..info('  dependency injection: ${config.dependencyInjection}')
         ..info('  models: ${config.models}')
         ..info('  API client: ${config.apiClient}');
+      if (!creatableArchitectureProfiles.contains(config.architecture)) {
+        _logger.warn(
+          'The "${config.architecture}" profile records an adopted project but '
+          'does not enable architecture generators in ForgeKit 0.1.0. Run '
+          '"forgekit doctor" to review the boundary before generating code.',
+        );
+      }
       return 0;
     } on ConfigException catch (error) {
       _logger.err(error.message);

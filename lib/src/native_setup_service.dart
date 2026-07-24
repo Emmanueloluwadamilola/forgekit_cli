@@ -21,6 +21,16 @@ Future<int> setIcon({
   required Directory root,
   NativeProcessExecutor? executor,
 }) async {
+  final hasAndroid = Directory(p.join(root.path, 'android')).existsSync();
+  final hasIos = Directory(p.join(root.path, 'ios')).existsSync();
+  if (!hasAndroid && !hasIos) {
+    logger.err(
+      'Launcher icon generation requires an Android or iOS platform directory. '
+      'Add a platform with "flutter create --platforms android,ios ." and retry.',
+    );
+    return 1;
+  }
+
   final dest = _copyInto(sourcePath, root, 'icon', logger);
   if (dest == null) return 1;
 
@@ -31,8 +41,8 @@ Future<int> setIcon({
   editor.update(
     ['flutter_launcher_icons'],
     {
-      'android': true,
-      'ios': true,
+      'android': hasAndroid,
+      'ios': hasIos,
       'image_path': dest,
       'remove_alpha_ios': true,
     },

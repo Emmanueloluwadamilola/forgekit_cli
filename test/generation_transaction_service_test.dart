@@ -76,6 +76,25 @@ void main() {
     expect(File(p.join(root.path, 'partial.txt')).existsSync(), isFalse);
   });
 
+  test('failed generation removes newly created empty directories', () async {
+    final transaction = await GenerationTransaction.begin(
+      root: root,
+      command: 'forgekit add feature broken',
+    );
+    final generatedDirectory = Directory(
+      p.join(root.path, 'lib', 'features', 'broken', 'domain'),
+    )..createSync(recursive: true);
+    File(p.join(generatedDirectory.path, 'broken.dart'))
+        .writeAsStringSync('class Broken {}');
+
+    await transaction.finish(success: false, dryRun: false, logger: logger);
+
+    expect(
+      Directory(p.join(root.path, 'lib', 'features', 'broken')).existsSync(),
+      isFalse,
+    );
+  });
+
   test('formats changed Dart files before recording the transaction', () async {
     final transaction = await GenerationTransaction.begin(
       root: root,
@@ -160,6 +179,27 @@ void main() {
       File(p.join(root.path, 'existing.txt')).readAsStringSync(),
       'before\n',
     );
+  });
+
+  test('rollback removes directories created by the transaction', () async {
+    final transaction = await GenerationTransaction.begin(
+      root: root,
+      command: 'forgekit add feature orders',
+    );
+    final generatedDirectory = Directory(
+      p.join(root.path, 'lib', 'features', 'orders'),
+    )..createSync(recursive: true);
+    File(p.join(generatedDirectory.path, 'orders.dart'))
+        .writeAsStringSync('class Orders {}');
+
+    await transaction.finish(success: true, dryRun: false, logger: logger);
+    expect(generatedDirectory.existsSync(), isTrue);
+
+    expect(
+      await rollbackLatestGeneration(root: root, logger: logger),
+      0,
+    );
+    expect(generatedDirectory.existsSync(), isFalse);
   });
 
   group('normalizeDryRunOption', () {

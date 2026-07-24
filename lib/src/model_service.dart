@@ -37,6 +37,15 @@ Future<int> addModel({
     return 1;
   }
   final projectName = detectProjectName(root: root);
+  final featureSnake = feature == null ? null : snakeCase(feature);
+  if (featureSnake != null &&
+      !Directory(
+        p.join(root.path, 'lib', 'features', featureSnake),
+      ).existsSync()) {
+    logger.err('Feature "$featureSnake" not found.');
+    logger.info('Create it first with: forgekit add feature $featureSnake');
+    return 1;
+  }
 
   logger.info(
     'Paste the JSON for "$base", then press Enter on an empty line:',
@@ -67,8 +76,8 @@ Future<int> addModel({
   final String modelDir;
   final String dtoDir;
   final String modelImport;
-  if (feature != null) {
-    final f = snakeCase(feature);
+  if (featureSnake != null) {
+    final f = featureSnake;
     modelDir =
         p.join(root.path, 'lib', 'features', f, 'domain', 'entity', 'model');
     dtoDir = p.join(root.path, 'lib', 'features', f, 'data', 'remote', 'dto');

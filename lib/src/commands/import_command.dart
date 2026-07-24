@@ -73,7 +73,8 @@ class _ImportOpenApiCommand extends Command<int> {
   @override
   String get invocation =>
       'forgekit import openapi <file-or-url> [--tag <tag>] '
-      '[--feature <name>] [--no-tests] [--no-build-runner] [--force]';
+      '[--feature <name>] [--base-url <url>] [--no-tests] '
+      '[--no-build-runner] [--allow-remote-references] [--force]';
 
   @override
   Future<int> run() async {

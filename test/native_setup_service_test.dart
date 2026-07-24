@@ -12,6 +12,7 @@ void main() {
 
   setUp(() {
     root = Directory.systemTemp.createTempSync('forgekit_native_setup_');
+    Directory(p.join(root.path, 'android')).createSync();
     File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('''
 name: sample_app
 dev_dependencies: {}
@@ -60,5 +61,24 @@ flutter:
       'flutter pub get',
       'dart run flutter_native_splash:create',
     ]);
+  });
+
+  test('icon setup fails before writing when no native platform exists',
+      () async {
+    Directory(p.join(root.path, 'android')).deleteSync();
+
+    final exitCode = await setIcon(
+      sourcePath: source.path,
+      logger: logger,
+      root: root,
+      executor: (_, __, ___) async => fail('must not run a process'),
+    );
+
+    expect(exitCode, 1);
+    expect(Directory(p.join(root.path, 'assets')).existsSync(), isFalse);
+    expect(
+      File(p.join(root.path, 'pubspec.yaml')).readAsStringSync(),
+      isNot(contains('flutter_launcher_icons')),
+    );
   });
 }

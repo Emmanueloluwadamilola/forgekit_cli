@@ -85,7 +85,7 @@ class _AddFeatureCommand extends Command<int> {
   @override
   String get invocation =>
       'forgekit add feature <name> [--router named|go_router] '
-      '[--no-build-runner]';
+      '[--with-tests] [--no-build-runner]';
 
   @override
   Future<int> run() async {
@@ -104,6 +104,15 @@ class _AddFeatureCommand extends Command<int> {
       return 1;
     }
     final config = loadForgeKitConfig(root: root);
+    if (!creatableArchitectureProfiles.contains(config.architecture)) {
+      _logger.err(
+        'Feature generation is not available for the '
+        '"${config.architecture}" adoption profile. Create a Clean, MVVM, or '
+        'Modular ForgeKit project, or migrate the application architecture '
+        'before changing forgekit.yaml.',
+      );
+      return 1;
+    }
     final requestedRouter = args['router'] as String?;
     if (config.architecture == 'modular' && requestedRouter != null) {
       _logger.err(
@@ -275,7 +284,11 @@ class _AddWidgetCommand extends Command<int> {
     final name = rest.first;
     final useStarter = argResults!['starter'] as bool;
     final force = argResults!['force'] as bool;
-    final root = findProjectRoot() ?? Directory.current;
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
 
     if (!useStarter) {
       final synced = await installSyncedWidget(
@@ -303,7 +316,7 @@ class _AddWidgetCommand extends Command<int> {
       return 1;
     }
 
-    final projectName = detectProjectName();
+    final projectName = detectProjectName(root: root);
     final progress = _logger.progress('Adding widget "$name"');
 
     final exitCode = await runMason(
@@ -484,7 +497,8 @@ class _AddFunctionCommand extends Command<int> {
 
   @override
   String get invocation =>
-      'forgekit add function [<feature>] <name> [--method <m>] [--path <p>] [--no-build-runner]';
+      'forgekit add function [<feature>] <name> [--method <m>] [--path <p>] '
+      '[--with-tests] [--no-build-runner]';
 
   @override
   Future<int> run() async {
@@ -595,7 +609,8 @@ class _AddModelCommand extends Command<int> {
 
   @override
   String get invocation =>
-      'forgekit add model [<feature>] <name> [--no-build-runner]';
+      'forgekit add model [<feature>] <name> [--feature <name>] '
+      '[--with-tests] [--no-build-runner]';
 
   @override
   Future<int> run() async {
@@ -1013,6 +1028,15 @@ class _AddUsecaseCommand extends Command<int> {
       return 1;
     }
     final projectName = detectProjectName(root: root);
+    final featureDir = Directory(
+      p.join(root.path, 'lib', 'features', feature),
+    );
+    if (!featureDir.existsSync()) {
+      _logger
+          .err('Feature "$feature" not found (looked for ${featureDir.path}).');
+      _logger.info('Create it first with: forgekit add feature $feature');
+      return 1;
+    }
 
     final dir = Directory(
       p.join(root.path, 'lib', 'features', feature, 'domain', 'usecase'),

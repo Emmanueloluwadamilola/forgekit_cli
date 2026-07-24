@@ -157,6 +157,16 @@ environment:
   test('runner generates only inside the selected workspace package', () async {
     final fixture = _createWorkspaceFixture();
     final original = Directory.current;
+    Directory(
+      p.join(
+        fixture.path,
+        'apps',
+        'mobile_app',
+        'lib',
+        'features',
+        'orders',
+      ),
+    ).createSync(recursive: true);
     Directory.current = fixture;
     try {
       final exitCode = await ForgeCommandRunner(

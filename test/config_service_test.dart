@@ -336,6 +336,55 @@ dependencies:
       root.deleteSync(recursive: true);
     }
   });
+
+  test('doctor does not treat an adopted lean app as Clean', () async {
+    final root = Directory.systemTemp.createTempSync('forgekit_lean_doctor_');
+    final original = Directory.current;
+    _writePubspec(root, '''
+name: sample_app
+dependencies:
+  flutter:
+    sdk: flutter
+''');
+    final mainFile = File(p.join(root.path, 'lib', 'main.dart'));
+    mainFile.parent.createSync(recursive: true);
+    mainFile.writeAsStringSync('void main() {}');
+    Directory.current = root;
+    try {
+      final runner = ForgeCommandRunner(logger: Logger(level: Level.quiet));
+
+      expect(await runner.run(['init']), 0);
+      expect(loadForgeKitConfig(root: root).architecture, 'lean');
+      expect(await runner.run(['doctor', '--fix']), 1);
+      expect(Directory(p.join(root.path, 'lib', 'core')).existsSync(), isFalse);
+    } finally {
+      Directory.current = original;
+      root.deleteSync(recursive: true);
+    }
+  });
+
+  test('feature generation rejects the lean adoption profile before Mason',
+      () async {
+    final root = Directory.systemTemp.createTempSync('forgekit_lean_feature_');
+    final original = Directory.current;
+    _writePubspec(root, 'name: sample_app\n');
+    File(p.join(root.path, 'forgekit.yaml')).writeAsStringSync(
+      const ForgeKitConfig(architecture: 'lean').toYaml(),
+    );
+    Directory.current = root;
+    try {
+      final runner = ForgeCommandRunner(logger: Logger(level: Level.quiet));
+
+      expect(
+        await runner.run(['add', 'feature', 'orders', '--no-build-runner']),
+        1,
+      );
+      expect(Directory(p.join(root.path, 'lib')).existsSync(), isFalse);
+    } finally {
+      Directory.current = original;
+      root.deleteSync(recursive: true);
+    }
+  });
 }
 
 void _writePubspec(Directory root, String contents) {

@@ -342,6 +342,14 @@ void unregisterFeatureRoutes({
     if (_isOwnedRouteLine(line, featureSnake)) {
       if (line.contains(':start')) skippingBlock = true;
       if (line.contains(':end')) skippingBlock = false;
+      if (config.router == 'named' &&
+          line.contains('// forgekit:route:') &&
+          !line.contains('// forgekit:route-import:') &&
+          !line.contains(':start') &&
+          !line.contains(':end') &&
+          !line.contains('.id:')) {
+        _removeWrappedNamedRouteStart(output);
+      }
       continue;
     }
     if (skippingBlock) continue;
@@ -360,3 +368,22 @@ bool _isOwnedRouteLine(String line, String featureSnake) => RegExp(
       '// forgekit:(?:route|route-import):${RegExp.escape(featureSnake)}'
       r'(?=[:\s]|$)',
     ).hasMatch(line);
+
+void _removeWrappedNamedRouteStart(List<String> output) {
+  for (var index = output.length - 1; index >= 0; index--) {
+    final candidate = output[index].trim();
+    if (RegExp(r'^[A-Za-z_$][A-Za-z0-9_$]*Screen\.id\s*:').hasMatch(
+      candidate,
+    )) {
+      output.removeRange(index, output.length);
+      return;
+    }
+    if (candidate.isEmpty ||
+        candidate.startsWith('//') ||
+        candidate.endsWith(',') ||
+        candidate.endsWith('{') ||
+        candidate.endsWith('[')) {
+      return;
+    }
+  }
+}

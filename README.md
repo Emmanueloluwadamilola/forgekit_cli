@@ -1,5 +1,8 @@
 # Flutter ForgeKit CLI
 
+<!-- [![Generated app quality](https://github.com/Emmanueloluwadamilola/forgekit_cli/actions/workflows/generated-app-quality.yml/badge.svg)](https://github.com/Emmanueloluwadamilola/forgekit_cli/actions/workflows/generated-app-quality.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) -->
+
 ForgeKit is a local-first code-generation toolkit for Flutter teams. Its goal
 is to turn a chosen Flutter architecture into repeatable CLI commands instead
 of having developers manually create folders, boilerplate, routes,
@@ -43,6 +46,7 @@ Mason, or pushing a shared widget registry with Git.
 - [Generation safety and rollback](#generation-safety-and-rollback)
 - [Using ForgeKit in a monorepo](#using-forgekit-in-a-monorepo)
 - [Development](#development)
+- [Contributing](#contributing)
 - [Security notes](#security-notes)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -61,8 +65,9 @@ Current boundaries that matter in professional use:
 - OpenAPI import currently targets the Clean Architecture profile only.
 - Flavor generation is Dart-side scaffolding; native Android product flavors,
   iOS schemes, signing, and store configuration remain application-owned.
-- The coverage gate measures eligible lines present in Flutter's LCOV report,
-  not every eligible source file in `lib/`. See [`forgekit test`](#forgekit-test).
+- The coverage gate fails closed: every eligible `lib/**/*.dart` file must
+  appear in Flutter's LCOV report, then the reported executable lines must meet
+  the configured threshold. See [`forgekit test`](#forgekit-test).
 - The source is distributed under the [Apache License 2.0](LICENSE), including
   an explicit patent grant and the usual warranty disclaimer.
 
@@ -211,7 +216,7 @@ forgekit create app shop_app \
   --org com.example \
   --architecture clean \
   --state-management provider \
-  --router go_router \
+  --router named \
   --platforms android,ios
 ```
 
@@ -606,7 +611,8 @@ Do not pass `--router` with the Modular profile. Flutter Modular owns routing.
 
 ForgeKit refuses unsupported combinations before writing files. It never
 creates Clean Architecture directories inside an MVVM or Modular project as a
-fallback.
+fallback. Lean and Legacy projects are adoption-only and reject
+architecture-specific generators.
 
 | Command family | Clean | MVVM | Modular |
 | --- | --- | --- | --- |
@@ -670,8 +676,9 @@ The settings currently used directly by generators are:
 - `generation.format`: formats changed Dart files after generation.
 - `generation.build_runner`: controls automatic `build_runner` execution for
   commands that support it.
-- `testing.coverage`: sets the minimum coverage for eligible lines present in
-  Flutter's LCOV report. It is not currently a whole-`lib/` coverage guarantee.
+- `testing.coverage`: sets the minimum coverage for eligible executable lines.
+  ForgeKit also fails when an eligible `lib/**/*.dart` file is absent from
+  Flutter's LCOV report.
 
 The version 1 file is also an enforceable generator contract. ForgeKit refuses
 recognized but unsupported backend values before it writes generated code. It
@@ -680,10 +687,14 @@ templates.
 
 | Architecture | `dependency_injection` | `models` | `api_client` |
 | --- | --- | --- | --- |
-| Clean, MVVM, Lean, Legacy | `injectable` | `json_serializable` | `retrofit` |
+| Clean, MVVM | `injectable` | `json_serializable` | `retrofit` |
 | Flutter Modular | `flutter_modular` | `json_serializable` | `retrofit` |
+| Lean, Legacy | Adoption-only; generation rejected | Adoption-only; generation rejected | Adoption-only; generation rejected |
 
-Those are the generation backends implemented in configuration version 1.
+Clean, MVVM, and Modular are the generation backends implemented in
+configuration version 1. Lean and Legacy preserve detected configuration
+without pretending a standard Flutter project already has ForgeKit's
+architecture markers and dependency wiring.
 Values such as `get_it`, `riverpod`, `freezed`, `dio`, and `http` may already
 exist in an adopted application, but they are not selectable ForgeKit code
 generation backends yet. This is separate from `state_management`: Riverpod is
@@ -958,6 +969,14 @@ management, and routing. It then records the supported generation backend for
 that architecture. Existing packages are not misrepresented as selectable
 ForgeKit backends. The command writes configuration only; it does not rewrite
 the application.
+
+An application that does not match the Clean, MVVM, or Modular layouts is
+recorded as `lean`. Lean and Legacy are adoption-only profiles in `0.1.0`:
+configuration, inspection, and architecture-neutral workflows remain
+available, while feature, screen, service, and architecture repair commands
+fail explicitly instead of creating Clean folders inside the existing app.
+Migrating an app to a generated architecture requires deliberate application
+work; changing only `forgekit.yaml` is not a migration.
 
 Expected result:
 
@@ -2254,8 +2273,8 @@ and meaningful expected values depend on the application domain.
 
 ### `forgekit test`
 
-Run the project's Flutter tests and enforce the configured threshold against
-the eligible lines present in Flutter's LCOV report:
+Run the project's Flutter tests, require every eligible production library in
+Flutter's LCOV report, and enforce the configured line-coverage threshold:
 
 ```sh
 forgekit test
@@ -2322,8 +2341,7 @@ coverage—for example during a fast local edit loop—use:
 forgekit test --no-coverage
 ```
 
-CI should normally use the default coverage-enabled behavior, with the
-whole-project limitation above understood.
+CI should normally use the default coverage-enabled, fail-closed behavior.
 
 ### `forgekit rename feature`
 
@@ -2336,8 +2354,8 @@ ForgeKit renames:
 - The Clean Architecture feature directory.
 - Matching generated test directories.
 - Filenames containing the old snake-case name.
-- Snake-case, camelCase, PascalCase, and title-case references in supported
-  text files under `lib/` and `test/`.
+- Feature-prefixed Dart identifiers.
+- Dart `import`, `export`, and `part` URIs plus ForgeKit-owned route markers.
 
 Example transformation:
 
@@ -2349,8 +2367,10 @@ OrdersRepository
 → PurchasesRepository
 ```
 
-Review broad application references after the command, particularly routes or
-external configuration not located under `lib/` and `test/`.
+String literals are deliberately preserved. This prevents a feature rename
+from silently changing Retrofit endpoints, JSON keys, analytics names, deep
+links, or user-facing copy. Review those contracts separately and change them
+only when the external behavior should also change.
 
 ### `forgekit remove feature`
 
@@ -2492,7 +2512,8 @@ dart run flutter_launcher_icons
 If `flutter pub get` or the icon generator fails, ForgeKit returns that non-zero
 exit code and the surrounding `set` transaction restores the copied asset and
 `pubspec.yaml`. Fix the reported upstream problem and rerun `forgekit set icon`.
-Android and iOS are enabled by the generated configuration.
+Only native platform directories already present in the project are enabled.
+The command fails before writing when neither `android/` nor `ios/` exists.
 
 ### `forgekit set splash`
 
@@ -3042,9 +3063,10 @@ in a public issue.
 - Transaction metadata stores only command paths and deliberately omits
   arguments and option values. Audit transaction files created by older
   development builds because they are not migrated automatically.
-- Installation and `forgekit update` should use a reviewed full commit SHA;
-  the update command rejects mutable or abbreviated refs. `setup` activates the
-  Mason CLI version tested with this ForgeKit release.
+- Install public releases from a reviewed release tag; high-assurance automation
+  can pin the full commit SHA behind that tag. `forgekit update` requires a full
+  immutable commit SHA and rejects branches, tags, and abbreviated refs.
+  `setup` activates the Mason CLI version tested with this ForgeKit release.
 - GitHub Actions dependencies are pinned to full commit SHAs and workflow token
   permissions are read-only, following
   [GitHub's secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use#using-third-party-actions).
@@ -3074,7 +3096,7 @@ in a public issue.
 | Feature inference fails | Pass the feature explicitly, for example `forgekit add screen orders detail`. |
 | Route generation fails or a route is missing | Current templates wire named, GoRouter, and Modular routes automatically. Restore the relevant ForgeKit route marker, verify `forgekit.yaml` matches the project, and rerun the command; do not maintain a second manual route system. |
 | Service generation cannot insert initialization | Current templates initialize generated services automatically before `runApp`. Verify that `main.dart` still contains `// forgekit:service-initializers`, restore the marker if it was intentionally removed, and rerun the command. |
-| Coverage is unexpectedly high | Inspect `coverage/lcov.info`; libraries never loaded by the tests can be absent and are not counted as zero in `0.1.0`. |
+| Coverage fails even though the reported percentage is high | Inspect `coverage/lcov.info`; ForgeKit fails closed when an eligible production library is absent, even if the lines that were reported have high coverage. Add tests that load the missing library or exclude only genuinely generated outputs through the supported suffix rules. |
 | Icon or splash generation fails | ForgeKit returns the upstream failure and restores the `set` transaction. Fix the Flutter/package error, then rerun the ForgeKit command. |
 | `set env` rejects a provider key | Bundled assets cannot protect secrets. If the provider explicitly documents the key as publishable client configuration, restrict it at the provider and rerun with `--allow-public-value`; otherwise move it server-side. |
 | `forgekit update` rejects a ref | Pass a reviewed complete 40- or 64-character commit SHA. Branches, tags, `HEAD`, and abbreviated SHAs are intentionally rejected. |
@@ -3084,6 +3106,14 @@ in a public issue.
 | OpenAPI import rejects the document | Confirm it is OpenAPI 3.0 or 3.1, uses a supported JSON media type, keeps local references below the entry directory, uses HTTPS for remote input, opts into trusted remote references when needed, and the project uses the Clean profile. |
 | Rollback refuses to continue | Run `forgekit diff`, preserve or commit manual edits, then decide whether `rollback --force` is appropriate. |
 | `--package` cannot find the app | Run `forgekit workspace list` and use the declared pubspec name or workspace-relative path. |
+
+## Contributing
+
+Bug reports and focused pull requests are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) for the supported development workflow,
+quality gates, generated-app checks, and expectations for changes to templates
+or file-writing behavior. Report security issues privately as described in
+[SECURITY.md](SECURITY.md).
 
 ## License
 

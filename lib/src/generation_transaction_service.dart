@@ -10,20 +10,25 @@ class GenerationTransaction {
     required this.root,
     required this.command,
     required Map<String, _FileSnapshot> before,
-  }) : _before = before;
+    required Set<String> beforeDirectories,
+  })  : _before = before,
+        _beforeDirectories = beforeDirectories;
 
   final Directory root;
   final String command;
   final Map<String, _FileSnapshot> _before;
+  final Set<String> _beforeDirectories;
 
   static Future<GenerationTransaction> begin({
     required Directory root,
     required String command,
   }) async {
+    final absoluteRoot = root.absolute;
     return GenerationTransaction._(
-      root: root.absolute,
+      root: absoluteRoot,
       command: command,
-      before: await _snapshotProject(root),
+      before: await _snapshotProject(absoluteRoot),
+      beforeDirectories: await _snapshotDirectories(absoluteRoot),
     );
   }
 
@@ -34,21 +39,30 @@ class GenerationTransaction {
     bool format = false,
   }) async {
     var after = await _snapshotProject(root);
+    var afterDirectories = await _snapshotDirectories(root);
     var changes = _compareSnapshots(_before, after);
 
     if (success && changes.isNotEmpty) {
       try {
         await _ensureForgeKitIgnored(root);
         after = await _snapshotProject(root);
+        afterDirectories = await _snapshotDirectories(root);
         changes = _compareSnapshots(_before, after);
         if (format) {
           await _formatChangedDartFiles(root, changes);
           after = await _snapshotProject(root);
+          afterDirectories = await _snapshotDirectories(root);
           changes = _compareSnapshots(_before, after);
         }
       } catch (error) {
         final current = await _snapshotProject(root);
-        await _restoreSnapshot(root: root, before: _before, after: current);
+        await _restoreSnapshot(
+          root: root,
+          before: _before,
+          after: current,
+          beforeDirectories: _beforeDirectories,
+          afterDirectories: await _snapshotDirectories(root),
+        );
         if (error is GenerationTransactionException) rethrow;
         throw GenerationTransactionException(
           'Could not prepare the generation transaction: $error',
@@ -60,7 +74,13 @@ class GenerationTransaction {
       if (dryRun) {
         _printChanges(changes, logger, heading: 'Planned changes');
       }
-      await _restoreSnapshot(root: root, before: _before, after: after);
+      await _restoreSnapshot(
+        root: root,
+        before: _before,
+        after: after,
+        beforeDirectories: _beforeDirectories,
+        afterDirectories: afterDirectories,
+      );
       if (!success && changes.isNotEmpty) {
         logger.warn(
           'The command failed. Flutter ForgeKit CLI restored ${changes.length} project '
@@ -78,6 +98,8 @@ class GenerationTransaction {
       command: command,
       before: _before,
       after: after,
+      beforeDirectories: _beforeDirectories,
+      afterDirectories: afterDirectories,
       changes: changes,
     );
     return changes;
@@ -265,6 +287,11 @@ Future<int> rollbackLatestGeneration({
     await target.parent.create(recursive: true);
     await _atomicWriteBytes(target, await backup.readAsBytes());
   }
+  await _removeEmptyDirectories(
+    root,
+    (transaction['createdDirectories'] as List?)?.whereType<String>().toSet() ??
+        const <String>{},
+  );
 
   transaction['rolledBackAt'] = DateTime.now().toUtc().toIso8601String();
   await _writeJsonAtomic(
@@ -301,6 +328,18 @@ Future<Map<String, _FileSnapshot>> _snapshotProject(Directory root) async {
     );
   }
   return files;
+}
+
+Future<Set<String>> _snapshotDirectories(Directory root) async {
+  final directories = <String>{};
+  if (!root.existsSync()) return directories;
+  await for (final entity in root.list(recursive: true, followLinks: false)) {
+    if (entity is! Directory) continue;
+    final relative = p.relative(entity.path, from: root.path);
+    if (_ignored(relative)) continue;
+    directories.add(relative);
+  }
+  return directories;
 }
 
 bool _ignored(String relativePath) {
@@ -365,6 +404,8 @@ Future<void> _restoreSnapshot({
   required Directory root,
   required Map<String, _FileSnapshot> before,
   required Map<String, _FileSnapshot> after,
+  required Set<String> beforeDirectories,
+  required Set<String> afterDirectories,
 }) async {
   for (final path in after.keys.where((path) => !before.containsKey(path))) {
     final file = File(p.join(root.path, path));
@@ -377,6 +418,25 @@ Future<void> _restoreSnapshot({
     await file.parent.create(recursive: true);
     await _atomicWriteBytes(file, entry.value.bytes);
   }
+  await _removeEmptyDirectories(
+    root,
+    afterDirectories.difference(beforeDirectories),
+  );
+}
+
+Future<void> _removeEmptyDirectories(
+  Directory root,
+  Set<String> relativePaths,
+) async {
+  final paths = relativePaths.toList()
+    ..sort((first, second) => second.length.compareTo(first.length));
+  for (final path in paths) {
+    final directory = Directory(p.join(root.path, path));
+    if (!directory.existsSync()) continue;
+    if (await directory.list(followLinks: false).isEmpty) {
+      await directory.delete();
+    }
+  }
 }
 
 Future<void> _recordTransaction({
@@ -384,6 +444,8 @@ Future<void> _recordTransaction({
   required String command,
   required Map<String, _FileSnapshot> before,
   required Map<String, _FileSnapshot> after,
+  required Set<String> beforeDirectories,
+  required Set<String> afterDirectories,
   required List<GenerationChange> changes,
 }) async {
   final now = DateTime.now().toUtc();
@@ -411,6 +473,8 @@ Future<void> _recordTransaction({
     'id': id,
     'createdAt': now.toIso8601String(),
     'command': command,
+    'createdDirectories':
+        (afterDirectories.difference(beforeDirectories).toList()..sort()),
     'changes': changes.map((change) => change.toJson()).toList(),
   };
   await _writeJsonAtomic(

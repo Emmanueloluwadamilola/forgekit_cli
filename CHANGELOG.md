@@ -45,6 +45,20 @@ therefore contain a breaking CLI or generation-contract change.
   debug build release gate.
 - Made coverage enforcement fail closed when eligible production libraries are
   missing from Flutter's LCOV report.
+- Prevented feature rename from changing API endpoint, JSON-key, deep-link, and
+  other string-literal contracts.
+- Fixed removal of named-route registrations wrapped across multiple lines by
+  `dart format`.
+- Restored newly created empty directories after failed, dry-run, and rolled
+  back generation transactions.
+- Required existing projects and source artifacts before starter widget,
+  use-case, and standalone test generation.
+- Made Lean and Legacy adoption-only profiles fail explicitly instead of
+  falling through to Clean generation and repair behavior.
+- Configured launcher icons only for native platforms present in the project.
+- Serialized CLI test suites that mutate the process-wide working directory,
+  and added format and executable-compilation CI gates.
 
-This is the first Git-distributed public beta. Install the reviewed full commit
-SHA published with the release notes using Dart Pub's Git activation support.
+This is the first Git-distributed public beta. Install the reviewed `v0.1.0`
+release tag with Dart Pub's Git activation support; high-assurance automation
+can pin the full commit SHA published with the release notes.

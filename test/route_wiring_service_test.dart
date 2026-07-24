@@ -147,6 +147,37 @@ void main() {
     expect(source, contains("path: '/manual'"));
     _expectDartParses(root, app.path);
   });
+
+  test('feature cleanup removes a named route wrapped by dart format', () {
+    final app = _write(
+      root,
+      'lib/core/presentation/app/app.dart',
+      '''
+import 'package:flutter/material.dart';
+import 'package:sample_app/features/inventory/presentation/screens/inventory_screen.dart'; // forgekit:route-import:inventory
+// forgekit:route-imports
+
+final routes = <String, WidgetBuilder>{
+  '/': (_) => const SizedBox(),
+  InventoryScreen.id: (_) =>
+      const InventoryScreen(), // forgekit:route:inventory
+  // forgekit:named-routes
+};
+''',
+    );
+
+    unregisterFeatureRoutes(
+      root: root,
+      config: const ForgeKitConfig(router: 'named'),
+      feature: 'inventory',
+    );
+
+    final source = app.readAsStringSync();
+    expect(source, isNot(contains('InventoryScreen')));
+    expect(source, isNot(contains('route:inventory')));
+    expect(source, contains("'/': (_) => const SizedBox()"));
+    _expectDartParses(root, app.path);
+  });
 }
 
 File _write(Directory root, String relativePath, String source) {

@@ -41,12 +41,23 @@ Future<int> addStorageService({
   final serviceSnake = snakeCase(name);
   final servicePascal = pascalCase(name);
   final serviceCamel = camelCase(name);
-  if (serviceSnake.isEmpty || servicePascal.isEmpty) {
-    logger.err('A service name is required.');
+  if (serviceSnake.isEmpty ||
+      !RegExp(r'^[A-Za-z][A-Za-z0-9]*$').hasMatch(servicePascal)) {
+    logger.err(
+      'Use a service name whose generated Dart type starts with a letter and '
+      'contains only letters or digits.',
+    );
     return 1;
   }
 
   final config = loadForgeKitConfig(root: root);
+  if (!creatableArchitectureProfiles.contains(config.architecture)) {
+    logger.err(
+      'Service generation is not available for the '
+      '"${config.architecture}" adoption profile.',
+    );
+    return 1;
+  }
   final projectName = detectProjectName(root: root);
   final serviceFile = File(
     p.join(root.path, 'lib', 'services', '${serviceSnake}_service.dart'),

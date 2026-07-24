@@ -39,8 +39,14 @@ jobs:
       - name: Analyze CLI
         run: dart analyze
 
+      - name: Check CLI formatting
+        run: dart format --output=none --set-exit-if-changed bin lib test tool
+
       - name: Test CLI
         run: dart test
+
+      - name: Compile CLI executable
+        run: dart compile exe bin/forgekit.dart -o forgekit-smoke
 
   representative-apps:
     name: Smoke / ${{ matrix.case }}
