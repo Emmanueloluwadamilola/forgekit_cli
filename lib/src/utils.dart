@@ -8,6 +8,10 @@ const supportedMasonCliVersion = '0.1.3';
 
 /// Shared helpers used across the `forgekit` commands.
 
+/// Converts a project-relative path to the portable form used in generated
+/// metadata and user-facing reports.
+String toPosixPath(String path) => path.replaceAll(r'\', '/');
+
 /// Walks up from [start] (default: current directory) looking for the nearest
 /// directory that contains a `pubspec.yaml`, i.e. the project root.
 ///

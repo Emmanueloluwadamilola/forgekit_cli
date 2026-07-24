@@ -4,6 +4,7 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 
 import 'config_service.dart';
+import 'utils.dart';
 
 const _generatedDartSuffixes = <String>[
   '.config.dart',
@@ -244,7 +245,9 @@ CoverageSummary parseLcov(
           reportedSources.contains(sourcePath)) {
         continue;
       }
-      missingSources.add(p.relative(sourcePath, from: canonicalProjectRoot));
+      missingSources.add(
+        toPosixPath(p.relative(sourcePath, from: canonicalProjectRoot)),
+      );
     }
   }
   missingSources.sort();

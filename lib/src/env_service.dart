@@ -8,6 +8,7 @@ import 'package:yaml_edit/yaml_edit.dart';
 
 import 'config_service.dart';
 import 'json_to_dart.dart';
+import 'utils.dart';
 
 Future<int> addEnvironments({
   required List<String> environments,
@@ -223,7 +224,7 @@ Map<String, List<String>> findPotentiallySensitiveBundledEnvironmentKeys(
           .toList()
         ..sort();
       if (keys.isNotEmpty) {
-        findings[p.relative(file.path, from: root.path)] = keys;
+        findings[toPosixPath(p.relative(file.path, from: root.path))] = keys;
       }
     } on FormatException {
       // Environment syntax is validated by the env command. Security scanning
