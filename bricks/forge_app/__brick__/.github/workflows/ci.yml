@@ -1,0 +1,59 @@
+# Continuous integration for {{name}}.
+#
+# Deliberately written without GitHub Actions `${…}` expression syntax: this
+# file is a Mason template, and Mustache would consume the doubled braces before
+# GitHub ever saw them. Add expressions only after generation.
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze-and-test:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      # Serialization and dependency-injection code is generated, not committed,
+      # so it has to be built before analysis or the analyzer reports missing
+      # `.g.dart` parts.
+      - name: Run code generators
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      # Formatting is not gated by default. Add it once you have run
+      # `dart format lib test` on this project at least once:
+      #   - name: Check formatting
+      #     run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test --coverage
+
+      # Verifies the project still matches the ForgeKit architecture standard.
+      # Remove this step if you stop using ForgeKit; it is not required to build.
+      - name: Check architecture contract
+        run: |
+          dart pub global activate --source git https://github.com/Emmanueloluwadamilola/forgekit_cli.git
+          forgekit setup
+          forgekit doctor --ci
+        continue-on-error: true

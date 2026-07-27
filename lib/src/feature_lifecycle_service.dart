@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'config_service.dart';
 import 'json_to_dart.dart';
 import 'route_wiring_service.dart';
+import 'utils.dart';
 
 Future<int> renameFeature({
   required Directory root,
@@ -117,7 +118,7 @@ Future<int> removeFeature({
   }
 
   if (!force) {
-    if (!stdin.hasTerminal || !stdout.hasTerminal) {
+    if (!hasInteractiveTerminal) {
       logger.err(
         'Refusing to remove without --force in a non-interactive shell.',
       );

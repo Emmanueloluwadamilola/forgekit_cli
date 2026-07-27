@@ -48,11 +48,19 @@ Future<int> addModel({
   }
 
   logger.info(
-    'Paste the JSON for "$base", then press Enter on an empty line:',
+    hasInteractiveTerminal
+        ? 'Paste the JSON for "$base", then press Enter on an empty line:'
+        : 'Reading the JSON for "$base" from stdin:',
   );
   final jsonText = _readBlock();
   if (jsonText.trim().isEmpty) {
     logger.err('No JSON provided.');
+    if (!hasInteractiveTerminal) {
+      logger.info(
+        'There is no terminal attached, so the JSON must be piped in:\n'
+        "  echo '{\"id\": 1}' | forgekit add model $name",
+      );
+    }
     return 1;
   }
 

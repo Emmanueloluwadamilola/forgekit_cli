@@ -6,18 +6,10 @@ import 'package:mason_logger/mason_logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:yaml_edit/yaml_edit.dart';
 
+import 'mason_environment.dart';
 import 'utils.dart';
 
-const _bricks = <String, String>{
-  'forge_app': 'bricks/forge_app',
-  'forge_app_mvvm': 'bricks/forge_app_mvvm',
-  'forge_app_modular': 'bricks/forge_app_modular',
-  'forge_feature': 'bricks/forge_feature',
-  'forge_feature_mvvm': 'bricks/forge_feature_mvvm',
-  'forge_feature_modular': 'bricks/forge_feature_modular',
-  'forge_widget': 'bricks/forge_widget',
-  'forge_service': 'bricks/forge_service',
-};
+const _bricks = forgekitBricks;
 
 /// Installs Flutter ForgeKit CLI's local dependencies and bundled bricks.
 Future<int> runSetup({Logger? logger}) async {
@@ -104,7 +96,7 @@ Future<Directory?> _resolvePackageRoot() async {
 }
 
 Future<Map<String, String>> _installBundledBricks(Directory packageRoot) async {
-  final installRoot = _forgekitHome();
+  final installRoot = forgekitHome();
   final installedBricksRoot = Directory(p.join(installRoot.path, 'bricks'));
   final installedBricks = <String, String>{};
 
@@ -119,29 +111,8 @@ Future<Map<String, String>> _installBundledBricks(Directory packageRoot) async {
   return installedBricks;
 }
 
-Directory _forgekitHome() {
-  final configuredHome = Platform.environment['FORGEKIT_HOME'];
-  if (configuredHome != null && configuredHome.trim().isNotEmpty) {
-    return Directory(configuredHome);
-  }
-
-  if (Platform.isWindows) {
-    final appData = Platform.environment['APPDATA'];
-    if (appData != null && appData.trim().isNotEmpty) {
-      return Directory(p.join(appData, 'ForgeKit'));
-    }
-  }
-
-  final home = Platform.environment['HOME'];
-  if (home != null && home.trim().isNotEmpty) {
-    return Directory(p.join(home, '.forgekit'));
-  }
-
-  return Directory(p.join(Directory.systemTemp.path, 'forgekit'));
-}
-
 Future<void> _removeForgekitMasonEntries() async {
-  final globalDir = _masonGlobalDir();
+  final globalDir = masonGlobalDir();
 
   await _removeForgekitEntriesFromYaml(
     File(p.join(globalDir.path, 'mason.yaml')),
@@ -153,35 +124,6 @@ Future<void> _removeForgekitMasonEntries() async {
   await _removeForgekitEntriesFromJson(
     File(p.join(globalDir.path, '.mason', 'bricks.json')),
   );
-}
-
-Directory _masonGlobalDir() {
-  final masonCache = Platform.environment['MASON_CACHE'];
-  if (masonCache != null && masonCache.trim().isNotEmpty) {
-    return Directory(p.join(masonCache, 'global'));
-  }
-
-  if (Platform.isWindows) {
-    final appData = Platform.environment['APPDATA'];
-    if (appData != null && appData.trim().isNotEmpty) {
-      final appDataCacheDir = Directory(p.join(appData, 'Mason', 'Cache'));
-      if (appDataCacheDir.existsSync()) {
-        return Directory(p.join(appDataCacheDir.path, 'global'));
-      }
-    }
-
-    final localAppData = Platform.environment['LOCALAPPDATA'];
-    if (localAppData != null && localAppData.trim().isNotEmpty) {
-      return Directory(p.join(localAppData, 'Mason', 'Cache', 'global'));
-    }
-  }
-
-  final home = Platform.environment['HOME'];
-  if (home != null && home.trim().isNotEmpty) {
-    return Directory(p.join(home, '.mason-cache', 'global'));
-  }
-
-  return Directory(p.join(Directory.systemTemp.path, 'mason-cache', 'global'));
 }
 
 Future<void> _removeForgekitEntriesFromYaml(File file) async {

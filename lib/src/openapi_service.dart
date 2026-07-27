@@ -1128,6 +1128,7 @@ Future<int> importOpenApi({
       ],
       logger: logger,
       workingDirectory: root.path,
+      requiredBrick: 'forge_feature',
     );
     if (masonCode != 0) {
       featureProgress.fail('Could not scaffold feature "$feature".');

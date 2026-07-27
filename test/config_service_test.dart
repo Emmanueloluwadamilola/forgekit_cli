@@ -239,6 +239,11 @@ dependencies:
         'named',
         '--state-management',
         'provider',
+        // Required so the invocation is complete without a terminal. Omitting it
+        // would make this test pass on the missing-flag check instead of the
+        // modular/router conflict it is named for.
+        '--platforms',
+        'web',
       ]),
       1,
     );

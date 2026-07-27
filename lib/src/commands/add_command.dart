@@ -163,6 +163,7 @@ class _AddFeatureCommand extends Command<int> {
         '.',
       ],
       logger: _logger,
+      requiredBrick: featureBrick,
     );
 
     if (exitCode != 0) {
@@ -331,6 +332,7 @@ class _AddWidgetCommand extends Command<int> {
         '.',
       ],
       logger: _logger,
+      requiredBrick: 'forge_widget',
     );
 
     if (exitCode != 0) {
@@ -390,7 +392,7 @@ class _AddServiceCommand extends Command<int> {
     final name = rest.first;
     final requestedDriver = argResults!['driver'] as String?;
     final driver = requestedDriver ??
-        (stdin.hasTerminal && stdout.hasTerminal
+        (hasInteractiveTerminal
             ? _logger.chooseOne(
                 'Select service type:',
                 choices: const [

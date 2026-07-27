@@ -9,6 +9,15 @@ homepage: https://github.com/Emmanueloluwadamilola/forgekit_cli
 issue_tracker: https://github.com/Emmanueloluwadamilola/forgekit_cli/issues
 
 environment:
+  # Deliberately lower than the >=3.8.0 the generated app bricks require. The
+  # mismatch is enforced at runtime instead, by
+  # `checkGeneratedProjectSdkSupport` in lib/src/utils.dart, which refuses to
+  # generate on a toolchain that could not build the result.
+  #
+  # Raising this to 3.8.0 also moves the package's language version past 3.7,
+  # which switches `dart format` to the tall style and would require reformatting
+  # the entire tree plus every Mason template in one commit. That reformat is
+  # worth doing, but as its own change — not bundled into a behaviour fix.
   sdk: ">=3.5.4 <4.0.0"
 
 executables:

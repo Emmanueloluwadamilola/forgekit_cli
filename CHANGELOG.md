@@ -4,6 +4,51 @@ All notable changes to Flutter ForgeKit CLI are documented here. The project
 uses semantic versioning while it remains pre-1.0; a minor-version change may
 therefore contain a breaking CLI or generation-contract change.
 
+## Unreleased
+
+Added:
+
+- `create app`, `add function`, and `add model` now detect the absence of an
+  interactive terminal and report the flags that replace each prompt, instead of
+  throwing or blocking in CI, container builds, and piped invocations.
+- `create app` and `doctor` verify the installed Flutter toolchain against the
+  generated-project Dart SDK floor before writing anything.
+- `doctor` reports bundled bricks that Mason has no registration for, so a
+  skipped `forgekit setup` is named rather than surfacing later as a bare
+  "Failed to add feature".
+- Mason failures for a bundled brick now check that brick's registration and
+  point at `forgekit setup` when it is missing.
+- Generated applications now ship a `.gitignore` (including `.forgekit/` and
+  `coverage/`), a `README.md`, a GitHub Actions CI workflow, and a starter test,
+  so a new project has a passing suite and a working CI run from its first
+  commit. The workflow's formatting gate is commented out until the bundled
+  templates are reformatted for the tall style.
+- Added `test/command_runner_e2e_test.dart`, which drives `ForgeCommandRunner`
+  end to end with the terminal check forced off, so any command that reaches an
+  unguarded prompt now fails the build.
+
+Fixed:
+
+- `add model` explains that JSON must be piped in when no terminal is attached.
+- Removed `dart pub publish --dry-run` from the required contributor checks; it
+  cannot run against `publish_to: none`.
+
+Internal:
+
+- Extracted brick-set, ForgeKit-home, and Mason-cache resolution into
+  `lib/src/mason_environment.dart`, shared by setup and the new checks.
+- All terminal detection now goes through `hasInteractiveTerminal`, which tests
+  override via `debugTerminalOverride`.
+
+Known follow-up:
+
+- The CLI's own SDK floor stays at `>=3.5.4` even though generated projects need
+  `>=3.8.0`, because raising it moves the package past language version 3.7 and
+  switches `dart format` to the tall style, requiring a tree-wide reformat. The
+  mismatch is enforced at runtime instead. Reformatting `lib`, `test`, `tool`,
+  and every `__brick__` template, then raising the floor and re-enabling both
+  formatting gates, is a single self-contained change.
+
 ## 0.1.0 - 2026-07-21
 
 - Added Clean, MVVM, and Flutter Modular application and feature profiles.

@@ -34,8 +34,10 @@ dart format --output=none --set-exit-if-changed bin lib test tool
 dart analyze
 dart test
 dart compile exe bin/forgekit.dart -o /tmp/forgekit
-dart pub publish --dry-run
 ```
+
+`dart pub publish --dry-run` is deliberately not in that list: `pubspec.yaml`
+sets `publish_to: none`, so `pub publish` refuses to run at all.
 
 Do not run `dart format .`: raw Mason templates contain Mustache expressions and
 are not valid Dart until rendered.

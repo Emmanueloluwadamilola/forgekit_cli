@@ -1,7 +1,7 @@
 # Flutter ForgeKit CLI
 
-<!-- [![Generated app quality](https://github.com/Emmanueloluwadamilola/forgekit_cli/actions/workflows/generated-app-quality.yml/badge.svg)](https://github.com/Emmanueloluwadamilola/forgekit_cli/actions/workflows/generated-app-quality.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE) -->
+[![Generated app quality](https://github.com/Emmanueloluwadamilola/forgekit_cli/actions/workflows/generated-app-quality.yml/badge.svg)](https://github.com/Emmanueloluwadamilola/forgekit_cli/actions/workflows/generated-app-quality.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 ForgeKit is a local-first code-generation toolkit for Flutter teams. Its goal
 is to turn a chosen Flutter architecture into repeatable CLI commands instead
@@ -114,7 +114,11 @@ The architecture contract used by the generators is documented in the
 
 - Dart SDK `>=3.5.4 <4.0.0` for the CLI and its pinned Mason toolchain.
 - Flutter SDK for application creation and generated Flutter workflows.
-- A current Flutter-bundled Dart SDK (`>=3.8.0`) for newly generated apps.
+- A current Flutter-bundled Dart SDK (`>=3.8.0`) for newly generated apps. The
+  CLI itself installs on an older SDK than the projects it generates, so
+  `forgekit create app` checks the installed Flutter toolchain first and refuses
+  rather than producing a project that cannot resolve its dependencies.
+  `forgekit doctor` reports the same mismatch as a warning.
 - `~/.pub-cache/bin` on `PATH` when using globally activated Dart tools.
 - Git for shared widget registries and CLI updates.
 - Internet access only for commands that download something, such as Google

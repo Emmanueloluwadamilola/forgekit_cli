@@ -70,6 +70,25 @@ Future<int> addFunction({
   final featurePascal = _pascal(featureSnake);
 
   // --- Gather inputs (no spinner running while we read stdin) ---
+  // `--method` and `--path` are prompted for when omitted, so without a
+  // terminal they have to be supplied up front. The JSON blocks below read
+  // piped stdin, which does work without a terminal.
+  if (!hasInteractiveTerminal) {
+    final missing = <String>[
+      if (method == null) '--method GET|POST|PUT|PATCH|DELETE',
+      if (path == null || path.isEmpty) '--path /some/endpoint',
+    ];
+    if (missing.isNotEmpty) {
+      logMissingInteractiveInput(
+        logger: logger,
+        missing: missing,
+        invocation: 'forgekit add function [<feature>] <name> '
+            '--method <m> --path <p>',
+      );
+      return 1;
+    }
+  }
+
   final chosenMethod = method ??
       logger.chooseOne(
         'HTTP method?',

@@ -380,6 +380,11 @@ Future<void> _runCase(
     workingDirectory: appDir.path,
     environment: environment,
   );
+  // TODO(forgekit): assert that generated output is format-clean once the
+  // `__brick__` templates have been reformatted for the tall style that applies
+  // at their language version (>=3.7). Adding the check first would fail every
+  // clean_* and mvvm_* case, because `create app` is not transactional and so
+  // brick output never passes through ForgeKit's own `dart format`.
   await _run(
     'Run generated application tests',
     Platform.resolvedExecutable,

@@ -35,6 +35,29 @@ class CreateCommand extends Command<int> {
   String get description => 'Create a new Flutter ForgeKit CLI project.';
 }
 
+/// The flags a non-interactive `forgekit create app` invocation must supply.
+///
+/// Returns an empty list when the invocation is already complete. Exposed
+/// because the message a user sees in CI is the whole point of the check, so it
+/// is asserted directly rather than through captured log output.
+///
+/// [router] is not required for the modular profile, which owns its own routing
+/// and rejects `--router` outright.
+List<String> missingCreateAppFlags({
+  required String? architecture,
+  required String? router,
+  required String? stateManagement,
+  required bool platformsParsed,
+}) {
+  return <String>[
+    if (architecture == null) '--architecture clean|mvvm|modular',
+    if (architecture != 'modular' && router == null) '--router named|go_router',
+    if (stateManagement == null)
+      '--state-management provider|riverpod|bloc|cubit',
+    if (!platformsParsed) '--platforms android,ios,web,macos,windows,linux',
+  ];
+}
+
 /// `forgekit create app <name> [--org com.forgecyberlabs]`
 class _CreateAppCommand extends Command<int> {
   _CreateAppCommand({Logger? logger}) : _logger = logger ?? Logger() {
@@ -139,6 +162,36 @@ class _CreateAppCommand extends Command<int> {
       return 1;
     }
     final font = args['font'] as String?;
+    final requestedRouter = args['router'] as String?;
+
+    // Without a terminal every prompt below would throw or block, so collect
+    // the flags that would have been prompted for and report them together.
+    // One round trip beats four. Checked before the toolchain probe because it
+    // costs nothing, while the probe spawns a process.
+    if (!hasInteractiveTerminal) {
+      final missing = missingCreateAppFlags(
+        architecture: args['architecture'] as String?,
+        router: requestedRouter,
+        stateManagement: args['state-management'] as String?,
+        platformsParsed: args.wasParsed('platforms'),
+      );
+      if (missing.isNotEmpty) {
+        logMissingInteractiveInput(
+          logger: _logger,
+          missing: missing,
+          invocation: invocation,
+        );
+        return 1;
+      }
+    }
+
+    // Verify the toolchain before prompting or writing anything. The bundled app
+    // bricks require a newer Dart SDK than the CLI itself does, so without this
+    // the failure surfaces as an opaque `pub get` error after creation has
+    // already reported success.
+    final sdkSupport = await checkGeneratedProjectSdkSupport(logger: _logger);
+    if (sdkSupport != 0) return sdkSupport;
+
     final architecture = args['architecture'] as String? ??
         _logger.chooseOne(
           'Select architecture:',
@@ -146,7 +199,6 @@ class _CreateAppCommand extends Command<int> {
           defaultValue: 'clean',
         ) ??
         'clean';
-    final requestedRouter = args['router'] as String?;
     if (architecture == 'modular' && requestedRouter != null) {
       _logger.err(
         '--router cannot be combined with --architecture modular because '
@@ -235,6 +287,7 @@ class _CreateAppCommand extends Command<int> {
           'overwrite',
         ],
         logger: _logger,
+        requiredBrick: appBrick,
       );
 
       if (exitCode != 0) {

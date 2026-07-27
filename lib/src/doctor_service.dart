@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'config_service.dart';
 import 'env_service.dart';
 import 'json_to_dart.dart';
+import 'mason_environment.dart';
 import 'utils.dart';
 
 /// Checks that a project conforms to the Flutter ForgeKit CLI standard.
@@ -51,6 +52,8 @@ Future<int> runDoctor({
       _checkAdoptionOnlyProject(root, issues, config.architecture);
   }
   _checkBundledEnvironmentKeys(root, issues);
+  _checkBrickRegistration(issues);
+  await _checkToolchain(issues);
 
   // --- report ---
   final errors = issues.where((i) => i.isError).toList();
@@ -72,6 +75,59 @@ Future<int> runDoctor({
 
   if (ci) return issues.isEmpty ? 0 : 1;
   return errors.isEmpty ? 0 : 1;
+}
+
+/// Reports bundled bricks that Mason does not know about, i.e. an installation
+/// where `forgekit setup` has not completed for this release.
+///
+/// Without this the failure only surfaces later, as a bare "Failed to add
+/// feature" from whichever generation command the user tried first.
+///
+/// Deliberately a warning rather than an error: doctor's errors mean "this
+/// project does not conform to the architecture standard", and an unregistered
+/// brick is a problem with the local installation, not with the project. Raising
+/// it to an error would make `doctor` fail on a perfectly well-formed project
+/// just because the machine running it had not been set up. `--ci` still fails
+/// on warnings, so a pipeline that needs generation to work is covered.
+void _checkBrickRegistration(List<_Issue> issues) {
+  final missing = unregisteredForgekitBricks();
+  if (missing.isEmpty) return;
+
+  issues.add(
+    _Issue.warn(
+      'Mason has no registration for ${missing.length} bundled brick(s): '
+      '${missing.join(', ')}. Code generation will fail until you run: '
+      'forgekit setup',
+    ),
+  );
+}
+
+/// Reports a toolchain that is too old to build a generated project.
+///
+/// Warnings for the same reason as [_checkBrickRegistration]: the toolchain is
+/// an environment property, not a property of the project being checked.
+Future<void> _checkToolchain(List<_Issue> issues) async {
+  final toolchain = await readFlutterToolchain();
+  if (toolchain == null) {
+    issues.add(
+      _Issue.warn(
+        'Could not read the Flutter toolchain version. Verify that Flutter is '
+        'installed and on your PATH.',
+      ),
+    );
+    return;
+  }
+
+  if (toolchain.dartSdkVersion < minimumGeneratedProjectDartSdk) {
+    issues.add(
+      _Issue.warn(
+        'Flutter ${toolchain.flutterVersion} bundles Dart '
+        '${toolchain.dartSdkVersion}, below the Dart '
+        '$minimumGeneratedProjectDartSdk a generated ForgeKit project '
+        'requires. Run: flutter upgrade',
+      ),
+    );
+  }
 }
 
 void _checkBundledEnvironmentKeys(Directory root, List<_Issue> issues) {
