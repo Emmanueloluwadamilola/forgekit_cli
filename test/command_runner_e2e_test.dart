@@ -190,6 +190,41 @@ void main() {
       );
     });
 
+    test('add firebase reports the flag that replaces its picker', () async {
+      _writeProject(root);
+      Directory.current = root;
+
+      final result = await ForgeCommandRunner(logger: logger).run([
+        'add',
+        'firebase',
+      ]);
+
+      expect(result, 1);
+      expect(
+        Directory(p.join(root.path, 'lib', 'services')).existsSync(),
+        isFalse,
+      );
+    });
+
+    test('add firebase refuses before flutterfire configure has run', () async {
+      _writeProject(root);
+      Directory.current = root;
+
+      final result = await ForgeCommandRunner(logger: logger).run([
+        'add',
+        'firebase',
+        '--features',
+        'push',
+      ]);
+
+      // lib/firebase_options.dart is absent, so generation must not start.
+      expect(result, 1);
+      expect(
+        File(p.join(root.path, 'pubspec.yaml')).readAsStringSync(),
+        isNot(contains('firebase_core')),
+      );
+    });
+
     test('add service picks the generic driver rather than a storage driver',
         () async {
       // Needs a bootstrap to wire startup into, otherwise the command fails and

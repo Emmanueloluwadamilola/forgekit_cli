@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../asset_service.dart';
 import '../config_service.dart';
 import '../env_service.dart';
+import '../firebase_service.dart';
 import '../flavor_service.dart';
 import '../font_service.dart';
 import '../function_service.dart';
@@ -40,6 +41,7 @@ class AddCommand extends Command<int> {
     addSubcommand(_AddI18nCommand(logger: _logger));
     addSubcommand(_AddStringCommand(logger: _logger));
     addSubcommand(_AddEnvCommand(logger: _logger));
+    addSubcommand(_AddFirebaseCommand(logger: _logger));
   }
 
   final Logger _logger;
@@ -50,7 +52,101 @@ class AddCommand extends Command<int> {
   @override
   String get description =>
       'Add a feature, function, model, screen, widget, service, usecase, '
-      'font, asset, flavor, test, i18n, string, or env.';
+      'font, asset, flavor, test, i18n, string, env, or firebase.';
+}
+
+/// `forgekit add firebase [--features crashlytics,analytics,push,remote_config]`
+///
+/// Generates one service per selected capability, registers each in DI, and
+/// inserts `Firebase.initializeApp` ahead of the dependency graph.
+///
+/// Firebase project registration and the native config files remain the
+/// FlutterFire CLI's job; this command requires `lib/firebase_options.dart` to
+/// already exist.
+class _AddFirebaseCommand extends Command<int> {
+  _AddFirebaseCommand({Logger? logger}) : _logger = logger ?? Logger() {
+    argParser
+      ..addMultiOption(
+        'features',
+        help: 'Firebase capabilities to generate. Omit in a terminal to '
+            'choose interactively.',
+        valueHelp: firebaseCapabilities.join(','),
+        allowed: allFirebaseCapabilityValues,
+        splitCommas: true,
+      )
+      ..addFlag(
+        'build-runner',
+        help: 'Override the forgekit.yaml build_runner setting.',
+      );
+  }
+
+  final Logger _logger;
+
+  @override
+  String get name => 'firebase';
+
+  @override
+  String get description =>
+      'Add Firebase capabilities (crashlytics, analytics, push notifications, '
+      'remote config) wired into DI and startup.';
+
+  @override
+  String get invocation => 'forgekit add firebase '
+      '[--features ${firebaseCapabilities.join(',')}] [--no-build-runner]';
+
+  @override
+  Future<int> run() async {
+    final args = argResults!;
+    if (args.rest.isNotEmpty) {
+      _logger
+        ..err('Unexpected argument "${args.rest.first}".')
+        ..info('Usage: $invocation');
+      return 1;
+    }
+
+    final root = findProjectRoot();
+    if (root == null) {
+      _logger.err('No pubspec.yaml found in this or any parent directory.');
+      return 1;
+    }
+
+    var requested = args['features'] as List<String>;
+    if (requested.isEmpty) {
+      if (!hasInteractiveTerminal) {
+        logMissingInteractiveInput(
+          logger: _logger,
+          missing: ['--features ${firebaseCapabilities.join(',')}'],
+          invocation: invocation,
+        );
+        return 1;
+      }
+      for (final capability in firebaseCapabilities) {
+        _logger.info('  ${firebaseCapabilityLabels[capability] ?? capability}');
+      }
+      final chosen = _logger.chooseAny(
+        'Select Firebase capabilities:',
+        choices: firebaseCapabilities,
+        defaultValues: const <String>[],
+      );
+      if (chosen.isEmpty) {
+        _logger.err('You must select at least one Firebase capability.');
+        return 1;
+      }
+      requested = chosen;
+    }
+
+    final config = loadForgeKitConfig(root: root);
+    final runBuildRunner = args.wasParsed('build-runner')
+        ? args['build-runner'] as bool
+        : config.runBuildRunner;
+
+    return addFirebase(
+      capabilities: requested,
+      root: root,
+      logger: _logger,
+      runBuildRunner: runBuildRunner,
+    );
+  }
 }
 
 /// `forgekit add feature <name> [--router named|go_router] [--no-build-runner]`

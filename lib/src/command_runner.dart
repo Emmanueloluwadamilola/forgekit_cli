@@ -19,6 +19,7 @@ import 'commands/set_command.dart';
 import 'commands/setup_command.dart';
 import 'commands/sync_command.dart';
 import 'commands/test_command.dart';
+import 'commands/uninstall_command.dart';
 import 'commands/update_command.dart';
 import 'commands/workspace_command.dart';
 import 'config_service.dart';
@@ -90,6 +91,7 @@ class ForgeCommandRunner extends CommandRunner<int> {
     addCommand(ImportCommand(logger: _logger));
     addCommand(InitCommand(logger: _logger));
     addCommand(RollbackCommand(logger: _logger));
+    addCommand(UninstallCommand(logger: _logger));
     addCommand(UpdateCommand(logger: _logger));
     addCommand(WorkspaceCommand(logger: _logger));
   }

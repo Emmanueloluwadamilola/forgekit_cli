@@ -56,6 +56,14 @@ flutter_secure_storage: ^10.3.1
 shared_preferences: ^2.5.5 # when a SharedPreferences storage service is added
 dartz: ^0.10.1            # optional, for Either-style error handling
 
+# Firebase, added by `forgekit add firebase` (see §6.1). Unreleased: these
+# baselines are taken from pub.dev but not yet smoke-tested.
+firebase_core: ^4.12.1           # any Firebase capability
+firebase_crashlytics: ^5.2.3     # --features crashlytics
+firebase_analytics: ^12.4.2      # --features analytics
+firebase_messaging: ^16.2.0      # --features push
+firebase_remote_config: ^6.4.0   # --features remote_config
+
 # dev
 build_runner: ^2.15.1
 injectable_generator: ^3.0.2
@@ -281,17 +289,20 @@ A service is a cross-cutting singleton in `lib/services/`, registered in DI as a
 `@lazySingleton` in Clean and MVVM projects or as one shared instance in the
 Flutter Modular composition root.
 
-ForgeKit supports two service categories:
+ForgeKit supports three service categories:
 
 - `generic` creates an initialized singleton skeleton for an application-owned
   SDK adapter or cross-cutting concern. The developer implements the
   service-specific behavior.
 - `shared_preferences` and `flutter_secure_storage` create complete,
   driver-backed storage implementations.
+- Firebase capabilities create complete, SDK-backed implementations through
+  `forgekit add firebase` (see §6.1). **Unreleased** — implemented but not yet
+  verified against a real Firebase project.
 
-Names such as `analytics`, `notification`, `remote_config`, `app_review`, and
-`deep_link` currently use the generic generator. ForgeKit does not install or
-implement their third-party SDKs automatically.
+Names such as `analytics`, `app_review`, and `deep_link` currently use the
+generic generator. ForgeKit does not install or implement their third-party
+SDKs automatically.
 
 Each generated service:
 1. Creates `lib/services/<name>_service.dart` with an `init()` method.
@@ -330,6 +341,90 @@ In an interactive terminal, omitting `--driver` asks the developer to choose
 between the generic and storage implementations. In automation, pass the
 driver explicitly. A generic service is fully registered and initialized, but
 its application-specific `init()` body remains intentionally unfinished.
+
+### 6.1 Firebase
+
+> **Unreleased and untested.** `forgekit add firebase` is implemented but has
+> not been verified against a real Firebase project. It is deliberately absent
+> from the README until it has been. Treat this section as the intended contract
+> rather than a description of shipped behaviour, and do not rely on it in a
+> production project yet.
+
+```sh
+forgekit add firebase --features crashlytics,analytics,push,remote_config
+```
+
+Omitting `--features` in an interactive terminal presents a multi-select. In
+automation the flag is required; the command refuses to prompt.
+
+| Capability | Generates | Package |
+| --- | --- | --- |
+| `crashlytics` | `lib/services/crashlytics_service.dart` | `firebase_crashlytics: ^5.2.3` |
+| `analytics` | `lib/services/analytics_service.dart` | `firebase_analytics: ^12.4.2` |
+| `push` | `lib/services/push_notification_service.dart` | `firebase_messaging: ^16.2.0` |
+| `remote_config` | `lib/services/remote_config_service.dart` | `firebase_remote_config: ^6.4.0` |
+| `backend` | Not implemented yet; the value is accepted and rejected with an explanatory message rather than an allowed-values error | — |
+
+Every capability adds `firebase_core: ^4.12.1`.
+
+**Initialization order within the selection is fixed**, not argument order:
+`crashlytics`, `analytics`, `push`, `remote_config`. Crashlytics is first so its
+`FlutterError.onError` and `PlatformDispatcher.instance.onError` handlers are
+installed before any later service can throw. Errors raised earlier than that —
+inside `configureDependencies()`, for instance — are not captured.
+
+**Division of responsibility.** ForgeKit generates application wiring only.
+Firebase project registration, platform enablement, `lib/firebase_options.dart`,
+`android/app/google-services.json`, and `ios/Runner/GoogleService-Info.plist`
+belong to the FlutterFire CLI. `forgekit add firebase` **fails** when
+`lib/firebase_options.dart` is absent rather than generating code that
+references a class that does not exist, and directs the developer to
+`flutterfire configure`.
+
+**Initialization order is a contract.** `Firebase.initializeApp` is inserted
+*before* `configureDependencies()`, not at the shared
+`// forgekit:service-initializers` marker. `FirebaseMessaging.instance` and
+`FirebaseRemoteConfig.instance` both throw when the core app is uninitialized,
+so a `@lazySingleton` resolved during DI setup would construct too early. In
+Modular projects, which have no GetIt bootstrap, initialization is inserted
+directly after `WidgetsFlutterBinding.ensureInitialized()`.
+
+The insertion is idempotent: re-running the command to add a second capability
+does not duplicate the call.
+
+**Generated services follow the standard §6 contract** — one file per
+capability in `lib/services/`, `@lazySingleton` in Clean and MVVM, a shared
+instance in the Modular composition root, an idempotent `init()`, and an
+initializer call before `runApp`.
+
+**Platform coverage is guarded, not assumed.** `create app` offers all six
+Flutter platforms; no Firebase plugin implements all of them. Every generated
+`init()` opens with a `defaultTargetPlatform` check and returns early on an
+unsupported target, because `init()` is awaited before `runApp` and a
+`MissingPluginException` there would abort startup rather than degrade.
+Crashlytics additionally excludes web. On web `defaultTargetPlatform` reports
+the browser's host platform, so `kIsWeb` is tested separately.
+
+Five boundaries the generated code documents rather than solves:
+
+- The FCM background handler is a top-level `@pragma('vm:entry-point')`
+  function. It runs in a separate isolate with no access to the DI graph, so it
+  cannot be a service method.
+- Remote Config defaults are declared as a `static const Map` on the service. A
+  key that exists in neither the defaults nor the server payload returns a zero
+  value instead of throwing, so declaring every key locally is required.
+- Crashlytics requires the `com.google.firebase.crashlytics` Gradle plugin in
+  `android/app`. Without it Dart errors still report, so the dashboard looks
+  healthy while native Android crashes and symbol upload silently do nothing.
+  `forgekit doctor` warns when the dependency is present and the plugin is not.
+- Analytics screen tracking is not automatic. `AnalyticsService` exposes a
+  single `FirebaseAnalyticsObserver` that the application attaches to
+  `MaterialApp.navigatorObservers` or `GoRouter.observers`. ForgeKit does not
+  wire it, because the insertion point differs per router and per profile.
+
+Platform work ForgeKit cannot perform is reported after generation: the
+Crashlytics Gradle plugin, the analytics observer, iOS Push Notifications and
+Background Modes capabilities, and the APNs key upload.
 
 ---
 

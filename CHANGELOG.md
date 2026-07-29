@@ -8,6 +8,37 @@ therefore contain a breaking CLI or generation-contract change.
 
 Added:
 
+- `forgekit add firebase --features crashlytics,analytics,push,remote_config`
+  generates fully implemented Crashlytics, Analytics, Cloud Messaging, and
+  Remote Config services, registers them in dependency injection, adds the
+  version-pinned packages, and inserts `Firebase.initializeApp` ahead of the
+  dependency graph. Omitting `--features` in a terminal opens a multi-select;
+  in CI the flag is required.
+  - Services initialize in a fixed order — crashlytics, analytics, push,
+    remote_config — regardless of argument order, so the Crashlytics error
+    handlers are installed before any later service can throw.
+  - Crashlytics disables reporting in debug builds and installs both
+    `FlutterError.onError` and `PlatformDispatcher.instance.onError`.
+  - Analytics exposes a single `FirebaseAnalyticsObserver`; ForgeKit reports
+    how to attach it rather than guessing the insertion point per router.
+  - Every generated `init()` guards on `defaultTargetPlatform` and returns
+    early on a platform the plugin does not implement. `create app` offers
+    Windows and Linux, where an unguarded call would throw
+    `MissingPluginException` before `runApp` and abort startup.
+  - `--features backend` is parsed and rejected with an explanatory message.
+    Firebase as a backend is not implemented yet.
+  - The command requires `lib/firebase_options.dart` and directs the developer
+    to `flutterfire configure` when it is missing, rather than generating code
+    that references a class which does not exist.
+  - Initialization is idempotent, so adding a second capability later does not
+    duplicate the call.
+  - Documented as §6.1 of the Architecture Standard.
+- `doctor` reports a project that depends on `firebase_core` but is missing
+  `lib/firebase_options.dart`, the `Firebase.initializeApp` call, or the
+  Android/iOS native config files. It also reports a `firebase_crashlytics`
+  dependency without the `com.google.firebase.crashlytics` Gradle plugin, which
+  otherwise fails silently.
+
 - `create app`, `add function`, and `add model` now detect the absence of an
   interactive terminal and report the flags that replace each prompt, instead of
   throwing or blocking in CI, container builds, and piped invocations.
@@ -26,6 +57,26 @@ Added:
 - Added `test/command_runner_e2e_test.dart`, which drives `ForgeCommandRunner`
   end to end with the terminal check forced off, so any command that reaches an
   unguarded prompt now fails the build.
+
+- `forgekit uninstall` removes everything `setup` installed in one command:
+  the global Mason brick registrations, `~/.forgekit`, and the executable —
+  in that order, because unregistering after deleting the brick directories
+  leaves Mason's global config pointing at paths that no longer exist.
+  - `--dry-run` prints the plan and changes nothing; the same list is shown
+    before the confirmation prompt.
+  - `--keep-widgets` preserves the synced widget library, the one
+    irreplaceable thing in the data directory.
+  - `--remove-mason` is opt-in: `setup` only installs Mason when it is absent,
+    so ForgeKit cannot tell whether it owns it.
+  - `--clean-project` removes `forgekit.yaml` and `.forgekit/` from the current
+    project only. It never searches the filesystem.
+  - Refuses to delete a filesystem root, an immediate child of one, or the home
+    directory, so a stray `FORGEKIT_HOME` cannot escalate into `rm -rf ~`.
+  - Requires `--force` in a non-interactive shell rather than prompting.
+  - Self-deactivation runs last and degrades gracefully on Windows, where a
+    running executable cannot be deleted.
+- `doc/UNINSTALL.md` documents the command, its options, and the manual
+  equivalent for when `forgekit` itself will not run.
 
 Fixed:
 

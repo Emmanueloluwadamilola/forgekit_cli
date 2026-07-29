@@ -102,6 +102,93 @@ void wireModularInitializedService({
   mainFile.writeAsStringSync(mainSource);
 }
 
+/// Inserts `Firebase.initializeApp` into `lib/main.dart` ahead of everything
+/// else the bootstrap does.
+///
+/// Firebase differs from an ordinary ForgeKit service: it is a prerequisite of
+/// the services that depend on it, not a peer. `FirebaseMessaging.instance` and
+/// `FirebaseRemoteConfig.instance` both throw if the core app has not been
+/// initialised, so this cannot use the shared
+/// `// forgekit:service-initializers` marker — that marker sits *after*
+/// `configureDependencies()`, and a `@lazySingleton` resolved during DI setup
+/// would construct before Firebase existed.
+///
+/// Insertion order, most specific anchor first:
+///   1. before `await configureDependencies();` (Clean and MVVM), or
+///   2. after `WidgetsFlutterBinding.ensureInitialized();` (Modular, which has
+///      no GetIt bootstrap).
+///
+/// Idempotent: a `main.dart` that already calls `Firebase.initializeApp` is
+/// returned unchanged, so re-running `forgekit add firebase` to add a second
+/// capability does not duplicate the call.
+void wireFirebaseCoreInitialization({
+  required Directory root,
+  required String projectName,
+}) {
+  final mainFile = File(p.join(root.path, 'lib', 'main.dart'));
+  if (!mainFile.existsSync()) {
+    throw const FileSystemException('Could not find lib/main.dart.');
+  }
+
+  var source = mainFile.readAsStringSync();
+  if (source.contains('Firebase.initializeApp(')) return;
+
+  source = addDartImport(source, 'package:firebase_core/firebase_core.dart');
+  source = addDartImport(source, 'package:$projectName/firebase_options.dart');
+
+  source = source.replaceFirst(
+    RegExp(r'\bvoid\s+main\s*\(\s*\)\s*\{'),
+    'Future<void> main() async {',
+  );
+  if (!source.contains('Future<void> main() async {')) {
+    throw const FormatException(
+      'Could not make main() asynchronous for Firebase initialization.',
+    );
+  }
+  if (!source.contains('WidgetsFlutterBinding.ensureInitialized();')) {
+    source = source.replaceFirst(
+      'Future<void> main() async {',
+      'Future<void> main() async {\n'
+          '  WidgetsFlutterBinding.ensureInitialized();',
+    );
+  }
+
+  const initialization = '  await Firebase.initializeApp(\n'
+      '    options: DefaultFirebaseOptions.currentPlatform,\n'
+      '  );';
+
+  const diAnchor = 'await configureDependencies();';
+  if (source.contains(diAnchor)) {
+    // Match the anchor with its leading indentation so the replacement keeps
+    // the original line intact.
+    final anchorPattern = RegExp(
+      r'^([ \t]*)' + RegExp.escape(diAnchor),
+      multiLine: true,
+    );
+    final match = anchorPattern.firstMatch(source);
+    if (match == null) {
+      // The anchor exists but not at the start of a line, e.g. a hand-edited
+      // `if (kDebugMode) await configureDependencies();`. Fall back to a plain
+      // substitution rather than throwing a TypeError.
+      source = source.replaceFirst(diAnchor, '$initialization\n\n  $diAnchor');
+    } else {
+      source = source.replaceRange(
+        match.start,
+        match.end,
+        '$initialization\n\n${match.group(1)}$diAnchor',
+      );
+    }
+  } else {
+    const bindingAnchor = 'WidgetsFlutterBinding.ensureInitialized();';
+    source = source.replaceFirst(
+      bindingAnchor,
+      '$bindingAnchor\n\n$initialization',
+    );
+  }
+
+  mainFile.writeAsStringSync(source);
+}
+
 String addDartImport(String source, String uri) {
   final import = "import '$uri';";
   if (source.contains(import)) return source;

@@ -134,7 +134,26 @@ git --version
 
 ## Installation
 
-### Install from GitHub
+### One line
+
+```sh
+dart pub global activate --source git https://github.com/Emmanueloluwadamilola/forgekit_cli.git --git-ref v0.1.0 && dart pub global run forgekit:forgekit setup
+```
+
+That installs the CLI and runs the required `setup` step in one go. It calls
+setup through `dart pub global run` rather than the bare `forgekit` name, so it
+works even on a shell where `~/.pub-cache/bin` is not yet on `PATH` — the most
+common reason a fresh install appears to succeed and then cannot find the
+command.
+
+Add `~/.pub-cache/bin` to your `PATH` afterwards to use `forgekit` directly:
+
+```sh
+export PATH="$HOME/.pub-cache/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
+forgekit --version
+```
+
+### Install from GitHub, step by step
 
 ```sh
 # Pinned to the reviewed v0.1.0 release tag
@@ -156,6 +175,22 @@ onboarding documentation. See
 replaces the local copies of ForgeKit's bundled bricks, and registers those
 brick names in Mason's global registry. Existing global registrations with the
 same `forge_*` names are replaced.
+
+Setup writes to four locations: the global Dart executable, Mason's global brick
+registry, `~/.forgekit` (or `%APPDATA%\ForgeKit`), and — if Mason was absent —
+the Mason CLI itself.
+
+To back all of that out:
+
+```sh
+forgekit uninstall --dry-run   # see exactly what would go
+forgekit uninstall
+```
+
+See [Removing Flutter ForgeKit CLI](doc/UNINSTALL.md) for the options and the
+manual equivalent. Removing the CLI does not affect projects it generated: they
+are plain Flutter code with ordinary pub dependencies and nothing that calls
+back into ForgeKit.
 
 Expected result, abbreviated:
 
@@ -759,6 +794,7 @@ The command surface at a glance:
 | `forgekit add screen ...` | Creates a screen with a route id. |
 | `forgekit add widget <name>` | Installs a synced widget or creates a starter. |
 | `forgekit add service <name>` | Creates a generic service or a fully wired storage service with `--driver`. |
+| `forgekit uninstall` | Removes ForgeKit and everything `setup` installed. `--dry-run` to preview. |
 | `forgekit add usecase ...` | Creates a starter Clean Architecture use case. |
 | `forgekit add font <family>` | Downloads and registers a Google Font. |
 | `forgekit add asset <path>` | Copies/registers assets and generates constants. |

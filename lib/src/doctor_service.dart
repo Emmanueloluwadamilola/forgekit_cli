@@ -52,6 +52,7 @@ Future<int> runDoctor({
       _checkAdoptionOnlyProject(root, issues, config.architecture);
   }
   _checkBundledEnvironmentKeys(root, issues);
+  _checkFirebaseConfiguration(root, issues);
   _checkBrickRegistration(issues);
   await _checkToolchain(issues);
 
@@ -75,6 +76,86 @@ Future<int> runDoctor({
 
   if (ci) return issues.isEmpty ? 0 : 1;
   return errors.isEmpty ? 0 : 1;
+}
+
+/// Reports Firebase wiring that is present but incomplete.
+///
+/// Only runs when the project actually depends on `firebase_core`, so projects
+/// that do not use Firebase see nothing. Everything here is a warning: which
+/// platforms a project targets is the developer's decision, and a missing
+/// config file for an unused platform is not a defect.
+void _checkFirebaseConfiguration(Directory root, List<_Issue> issues) {
+  final pubspec = File(p.join(root.path, 'pubspec.yaml'));
+  if (!pubspec.existsSync()) return;
+  final pubspecSource = pubspec.readAsStringSync();
+  if (!pubspecSource.contains('firebase_core:')) return;
+
+  // Crashlytics fails quietly without its Gradle plugin: Dart errors still
+  // report, so the dashboard looks alive while native crashes and symbol
+  // upload silently do nothing.
+  if (pubspecSource.contains('firebase_crashlytics:')) {
+    final gradle = [
+      File(p.join(root.path, 'android', 'app', 'build.gradle')),
+      File(p.join(root.path, 'android', 'app', 'build.gradle.kts')),
+    ].where((file) => file.existsSync()).toList();
+
+    if (gradle.isNotEmpty &&
+        !gradle.any(
+          (file) => file
+              .readAsStringSync()
+              .contains('com.google.firebase.crashlytics'),
+        )) {
+      issues.add(
+        _Issue.warn(
+          'firebase_crashlytics is a dependency but the '
+          '"com.google.firebase.crashlytics" Gradle plugin is not applied in '
+          'android/app. Native Android crashes and symbol upload will not '
+          'work.',
+        ),
+      );
+    }
+  }
+
+  if (!File(p.join(root.path, 'lib', 'firebase_options.dart')).existsSync()) {
+    issues.add(
+      _Issue.warn(
+        'firebase_core is a dependency but lib/firebase_options.dart is '
+        'missing. Run `flutterfire configure`.',
+      ),
+    );
+  }
+
+  final mainFile = File(p.join(root.path, 'lib', 'main.dart'));
+  if (mainFile.existsSync() &&
+      !mainFile.readAsStringSync().contains('Firebase.initializeApp(')) {
+    issues.add(
+      _Issue.warn(
+        'firebase_core is a dependency but lib/main.dart never calls '
+        'Firebase.initializeApp. Firebase services will throw on first use.',
+      ),
+    );
+  }
+
+  if (Directory(p.join(root.path, 'android')).existsSync() &&
+      !File(p.join(root.path, 'android', 'app', 'google-services.json'))
+          .existsSync()) {
+    issues.add(
+      _Issue.warn(
+        'Missing android/app/google-services.json. Run `flutterfire '
+        'configure` and select Android.',
+      ),
+    );
+  }
+  if (Directory(p.join(root.path, 'ios')).existsSync() &&
+      !File(p.join(root.path, 'ios', 'Runner', 'GoogleService-Info.plist'))
+          .existsSync()) {
+    issues.add(
+      _Issue.warn(
+        'Missing ios/Runner/GoogleService-Info.plist. Run `flutterfire '
+        'configure` and select iOS.',
+      ),
+    );
+  }
 }
 
 /// Reports bundled bricks that Mason does not know about, i.e. an installation
