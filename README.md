@@ -1,10 +1,10 @@
 # Flutter ForgeKit CLI
 
-Scaffolds Flutter projects and generates code that keeps following the same
+Flutter ForgeKit CLI scaffolds Flutter projects and generates code that keeps following the same
 architecture as the project grows.
 
 Starting a Flutter app means making the same decisions every time — folder
-structure, state management, networking, dependency injection — then hand-writing
+structure, state management, networking, dependency injection, then hand-writing
 the boilerplate that connects them. ForgeKit does that once, records the choices
 in a config file, and generates every later feature, screen, model, and service in
 the same shape. It runs locally, wraps changes in transactions you can preview and
