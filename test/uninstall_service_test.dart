@@ -33,8 +33,8 @@ void main() {
     });
 
     test('refuses the home directory itself', () {
-      final home = Platform.environment['HOME'] ??
-          Platform.environment['USERPROFILE'];
+      final home =
+          Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
       if (home == null || home.trim().isEmpty) return;
 
       expect(isUnsafeUninstallTarget(Directory(home)), isTrue);

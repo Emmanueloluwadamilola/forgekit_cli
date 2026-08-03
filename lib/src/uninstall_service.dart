@@ -124,9 +124,8 @@ bool isUnsafeUninstallTarget(Directory directory) {
   final resolved = p.normalize(directory.absolute.path);
   if (p.split(resolved).length <= 2) return true;
 
-  final home = Platform.environment['HOME'] ??
-      Platform.environment['USERPROFILE'] ??
-      '';
+  final home =
+      Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '';
   if (home.trim().isNotEmpty && p.normalize(home) == resolved) return true;
 
   return false;

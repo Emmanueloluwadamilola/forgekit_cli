@@ -271,9 +271,8 @@ void main() {
         'push_notification_service',
         'remote_config_service',
       ]) {
-        final source =
-            File(p.join(root.path, 'lib', 'services', '$name.dart'))
-                .readAsStringSync();
+        final source = File(p.join(root.path, 'lib', 'services', '$name.dart'))
+            .readAsStringSync();
         expect(
           source,
           contains('_supportedPlatforms.contains(defaultTargetPlatform)'),
@@ -408,8 +407,8 @@ void main() {
       );
 
       expect(code, 0);
-      final main = File(p.join(root.path, 'lib', 'main.dart'))
-          .readAsStringSync();
+      final main =
+          File(p.join(root.path, 'lib', 'main.dart')).readAsStringSync();
       expect(
         'Firebase.initializeApp('.allMatches(main).length,
         1,
@@ -457,8 +456,8 @@ void main() {
         ),
       );
 
-      final main = File(p.join(root.path, 'lib', 'main.dart'))
-          .readAsStringSync();
+      final main =
+          File(p.join(root.path, 'lib', 'main.dart')).readAsStringSync();
       expect(main, contains('await pushNotificationService.init();'));
     });
 
@@ -484,8 +483,8 @@ void main() {
 
       wireFirebaseCoreInitialization(root: root, projectName: 'sample_app');
 
-      final main = File(p.join(root.path, 'lib', 'main.dart'))
-          .readAsStringSync();
+      final main =
+          File(p.join(root.path, 'lib', 'main.dart')).readAsStringSync();
       expect(
         main.indexOf('WidgetsFlutterBinding.ensureInitialized();'),
         lessThan(main.indexOf('Firebase.initializeApp(')),

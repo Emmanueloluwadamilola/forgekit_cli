@@ -647,9 +647,31 @@ class _FileSnapshot {
   final int lines;
 }
 
+/// Sub-commands that declare their own `--dry-run`. Hoisting the flag out of
+/// these would hand it to the global parser, which rejects `--dry-run` for
+/// anything outside the transactional allow-list.
+const _localDryRunCommands = {'uninstall'};
+
+/// The sub-command in [args], skipping any global flags and options before it.
+String? _subcommandName(List<String> args) {
+  for (var index = 0; index < args.length; index++) {
+    final argument = args[index];
+    if (argument == '--') return null;
+    // The only global option that consumes a separate value.
+    if (argument == '--package') {
+      index++;
+      continue;
+    }
+    if (argument.startsWith('-')) continue;
+    return argument;
+  }
+  return null;
+}
+
 /// Allows the global `--dry-run` flag to appear after subcommands.
 List<String> normalizeDryRunOption(Iterable<String> arguments) {
   final args = arguments.toList();
+  if (_localDryRunCommands.contains(_subcommandName(args))) return args;
   final remaining = <String>[];
   var found = false;
   for (var index = 0; index < args.length; index++) {

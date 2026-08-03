@@ -340,8 +340,7 @@ void _reportNativeConfiguration({
   final ios = Directory(p.join(root.path, 'ios'));
 
   if (android.existsSync() &&
-      !File(p.join(android.path, 'app', 'google-services.json'))
-          .existsSync()) {
+      !File(p.join(android.path, 'app', 'google-services.json')).existsSync()) {
     missing.add('android/app/google-services.json');
   }
   if (ios.existsSync() &&

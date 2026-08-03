@@ -213,6 +213,17 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('leaves the flag alone for commands that declare their own', () {
+      expect(
+        normalizeDryRunOption(['uninstall', '--dry-run']),
+        ['uninstall', '--dry-run'],
+      );
+      expect(
+        normalizeDryRunOption(['--package', 'app', 'uninstall', '--dry-run']),
+        ['--package', 'app', 'uninstall', '--dry-run'],
+      );
+    });
   });
 
   test('transaction command labels exclude arguments and option values', () {
